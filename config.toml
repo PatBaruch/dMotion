@@ -1,0 +1,29 @@
+# Paths are relative to this file. Override locally in config.local.toml.
+[detector]
+model = "models/yolov8s-worldv2.pt"
+# These are experimental text prompts, not a trained money-spread category.
+prompts = ["a fan of banknotes", "banknotes", "cash money"]
+confidence = 0.25
+image_size = 416
+device = "auto" # auto, cpu, mps, or cuda:0
+
+[camera]
+index = 0
+width = 1280
+height = 720
+mirror = true
+max_result_age_seconds = 2.0
+
+[trigger]
+consecutive_hits = 3
+reset_seconds = 1.0
+cooldown_seconds = 3.0
+
+[audio]
+enabled = true
+# A generated two-tone beep is used until you add your own sound here.
+file = "assets/motion_detected.wav"
+volume = 0.7
+
+[overlay]
+solid_box = false
