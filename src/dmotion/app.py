@@ -161,11 +161,17 @@ def run_camera(config: AppConfig, *, demo: bool = False, checking: bool = False)
                 lines = [
                     "AI CHECK: person / phone / cup / bottle / book"
                     if checking
-                    else "MONEY MODE | To test common objects: make diagnose",
+                    else (
+                        "TRAINED MONEY SPREAD | Test with new examples"
+                        if config.detector.backend == "trained"
+                        else "MONEY MODE | To test common objects: make diagnose"
+                    ),
                     monitor.headline(now, checking=checking, confidence=config.detector.confidence),
                     f"Frames analysed: {monitor.completed} | Objects now: {len(detections)}"
                     f" | Last check: {monitor.inference_ms:.0f} ms | Device: {detector.device}",
                 ]
+                if detector.training_note:
+                    lines.append(detector.training_note)
                 if monitor.error:
                     lines.extend([monitor.error[:90], "Restart with CPU if this is a device error"])
                 elif monitor.last_result_stale:

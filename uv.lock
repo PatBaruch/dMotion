@@ -337,6 +337,7 @@ vision = [
     { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
     { name = "numpy", version = "2.5.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
     { name = "opencv-python" },
+    { name = "pillow" },
     { name = "pygame" },
     { name = "ultralytics" },
 ]
@@ -352,6 +353,7 @@ requires-dist = [
     { name = "clip", marker = "extra == 'vision'", git = "https://github.com/ultralytics/CLIP.git?rev=a13192f8cb767260d7dfd98c843b0716593169e7" },
     { name = "numpy", marker = "extra == 'vision'", specifier = ">=1.26,<3" },
     { name = "opencv-python", marker = "extra == 'vision'", specifier = ">=4.10,<5" },
+    { name = "pillow", marker = "extra == 'vision'", specifier = ">=11,<13" },
     { name = "pygame", marker = "extra == 'vision'", specifier = ">=2.6,<3" },
     { name = "ultralytics", marker = "extra == 'vision'", specifier = ">=8.4,<9" },
 ]

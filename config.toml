@@ -1,6 +1,7 @@
 # Paths are relative to this file. Override locally in config.local.toml.
 [detector]
 model = "models/yolov8s-worldv2.pt"
+backend = "world" # use --mode trained after training your own model
 # These are experimental text prompts, not a trained money-spread category.
 prompts = ["a fan of banknotes", "banknotes", "cash money"]
 confidence = 0.25

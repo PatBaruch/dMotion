@@ -74,11 +74,21 @@ Demo mode uses a simulated box and does not verify model recognition. Automated
 checks do not establish camera hardware behavior or real-money accuracy; record
 those results separately when testing on the laptop.
 
-## Next improvement
+## Custom training workflow
 
-If prompt-based detection is insufficient, label one box around each entire cash
-fan in a diverse dataset, include negative examples, and fine-tune a detector.
-Replace the model adapter while preserving the camera, audio, and trigger logic.
+The [training guide](TRAINING.md) covers collection, local annotation, imports,
+downloads, dataset building, and custom detector training. `--mode trained` selects
+the `money_spread` model while preserving the camera, audio, and trigger logic.
+
+Review status and session groups are part of the dataset, not incidental UI state.
+Never infer a negative label from an unreviewed image. Keep recording sessions
+together across train, validation, and test splits; splitting adjacent frames
+randomly can produce misleading results. Validate bounding boxes before export.
+
+Datasets and trained weights are excluded from Git. Keep repeatable training
+settings and code in version control, and back up the source dataset and useful
+training runs separately. Core checks must continue to run without camera
+hardware, downloaded weights, or the optional vision dependencies.
 
 ## Licensing
 

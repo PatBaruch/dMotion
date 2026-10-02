@@ -58,3 +58,15 @@ def test_check_mode_does_not_mutate_money_prompts_or_sensitivity(tmp_path):
 def test_unsupported_mode_fails_explicitly(tmp_path):
     with pytest.raises(ValueError):
         apply_mode(AppConfig(root=tmp_path), "unknown")
+
+
+def test_trained_mode_loads_custom_category_and_check_can_still_verify_common_objects(tmp_path):
+    config = AppConfig(root=tmp_path)
+    trained = apply_mode(config, "trained")
+    assert trained.detector.backend == "trained"
+    assert trained.detector.model == "models/money-spread.pt"
+    assert trained.detector.image_size == 640
+    checking = apply_mode(trained, "check")
+    assert checking.detector.backend == "world"
+    assert checking.detector.model == config.detector.model
+    assert checking.detector.prompts[0] == "person"

@@ -1,4 +1,4 @@
-.PHONY: setup prepare run diagnose demo doctor sound image check format
+.PHONY: setup prepare run diagnose demo doctor sound image fetch collect label dataset build-dataset train trained check format
 
 setup:
 	sh scripts/setup.sh
@@ -11,6 +11,27 @@ run:
 
 diagnose:
 	.venv/bin/dmotion run --mode check
+
+fetch:
+	.venv/bin/dmotion fetch examples/money-spread-sources.json
+
+collect:
+	.venv/bin/dmotion collect
+
+label:
+	.venv/bin/dmotion label
+
+dataset:
+	.venv/bin/dmotion dataset
+
+build-dataset:
+	.venv/bin/dmotion build-dataset
+
+train:
+	.venv/bin/dmotion train
+
+trained:
+	.venv/bin/dmotion run --mode trained
 
 demo:
 	.venv/bin/dmotion run --demo

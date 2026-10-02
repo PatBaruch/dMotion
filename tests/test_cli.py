@@ -58,3 +58,31 @@ def test_check_mode_reaches_camera_with_user_overrides(monkeypatch):
     assert received["config"].detector.confidence == 0.1
     assert received["config"].camera.index == 1
     assert received["config"].audio.enabled is False
+
+
+def test_collect_success_returns_zero_even_when_multiple_frames_saved(monkeypatch, tmp_path):
+    received = {}
+
+    def collect(config, directory, **kwargs):
+        received.update(config=config, directory=directory, **kwargs)
+        return 20
+
+    monkeypatch.setitem(sys.modules, "dmotion.collect", SimpleNamespace(record_camera=collect))
+    assert main(["collect", "--dataset", str(tmp_path), "--kind", "negative"]) == 0
+    assert received["kind"] == "negative"
+    assert received["directory"] == tmp_path
+
+
+def test_trained_mode_uses_custom_backend(monkeypatch):
+    received = {}
+
+    def camera(config, *, demo, checking):
+        received.update(config=config, checking=checking)
+        return 0
+
+    monkeypatch.setitem(
+        sys.modules, "dmotion.app", SimpleNamespace(run_camera=camera, run_image=None)
+    )
+    assert main(["run", "--mode", "trained"]) == 0
+    assert received["config"].detector.backend == "trained"
+    assert received["checking"] is False

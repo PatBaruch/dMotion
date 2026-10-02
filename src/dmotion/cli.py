@@ -1,6 +1,7 @@
 """Command-line entry point; --help and config validation need no ML imports."""
 
 import argparse
+import json
 import logging
 import sys
 import time
@@ -22,18 +23,26 @@ def parser() -> argparse.ArgumentParser:
         ("prepare", "Download/load model weights and verify inference without a camera"),
         ("doctor", "Validate settings and report installed dependencies"),
         ("sound", "Test the configured alert sound"),
+        ("dataset", "Show photo and label counts"),
+        ("label", "Review and draw money-spread boxes in your browser"),
+        ("collect", "Save webcam examples automatically"),
+        ("import", "Import photos, folders, or video frames"),
+        ("fetch", "Download a curated JSON list of image URLs"),
+        ("build-dataset", "Export reviewed examples to grouped YOLO splits"),
+        ("train", "Train a small money-spread model from reviewed examples"),
     ]:
         command = commands.add_parser(name, help=help_text)
         command.add_argument("--config", type=Path, default=Path("config.toml"))
         if name in {"run", "image", "prepare"}:
             command.add_argument(
                 "--mode",
-                choices=("money", "check"),
+                choices=("money", "check", "trained"),
                 default="money",
                 help="check detects common objects to verify the model works",
             )
             command.add_argument("--confidence", type=float)
             command.add_argument("--device")
+            command.add_argument("--model", help="Override the model path for the selected mode")
             command.add_argument(
                 "--prompt", action="append", help="Repeat to replace default prompts"
             )
@@ -45,6 +54,29 @@ def parser() -> argparse.ArgumentParser:
             command.add_argument("source", type=Path)
             command.add_argument("--output", type=Path)
             command.add_argument("--show", action="store_true")
+        if name in {"dataset", "label", "collect", "import", "fetch", "build-dataset", "train"}:
+            command.add_argument("--dataset", type=Path, default=Path("data/training"))
+        if name == "label":
+            command.add_argument("--port", type=int, default=0)
+            command.add_argument("--no-browser", action="store_true")
+        if name == "collect":
+            command.add_argument("--seconds", type=float, default=20)
+            command.add_argument("--interval", type=float, default=1)
+            command.add_argument("--camera", type=int)
+            command.add_argument(
+                "--kind", choices=("unreviewed", "positive", "negative"), default="unreviewed"
+            )
+        if name == "import":
+            command.add_argument("paths", type=Path, nargs="+")
+            command.add_argument("--group")
+            command.add_argument("--interval", type=float, default=1)
+        if name == "fetch":
+            command.add_argument("sources", type=Path)
+            command.add_argument("--limit", type=int, default=20)
+        if name == "train":
+            command.add_argument("--epochs", type=int, default=30)
+            command.add_argument("--image-size", type=int, default=640)
+            command.add_argument("--device", default="auto")
     return root
 
 
@@ -83,7 +115,7 @@ def main(argv: list[str] | None = None) -> int:
             if args.mode == "check":
                 logging.info("AI check mode: look for a person, phone, cup, bottle, or book")
         overrides = {}
-        for name in ("confidence", "device"):
+        for name in ("confidence", "device", "model"):
             if getattr(args, name, None) is not None:
                 overrides[name] = getattr(args, name)
         if getattr(args, "prompt", None):
@@ -95,6 +127,63 @@ def main(argv: list[str] | None = None) -> int:
         if getattr(args, "mute", False):
             config = replace(config, audio=replace(config.audio, enabled=False))
         validate(config)
+        if hasattr(args, "dataset"):
+            from dmotion.dataset import Dataset, export_dataset
+
+            directory = config.resolve(str(args.dataset))
+            if args.command == "dataset":
+                print(json.dumps(Dataset(directory).summary(), indent=2))
+                return 0
+            if args.command == "label":
+                from dmotion.labeler import run_labeler
+
+                return run_labeler(directory, open_browser=not args.no_browser, port=args.port)
+            if args.command == "collect":
+                from dmotion.collect import record_camera
+
+                record_camera(
+                    config, directory, seconds=args.seconds, interval=args.interval, kind=args.kind
+                )
+                return 0
+            if args.command == "import":
+                from dmotion.collect import import_images, import_video
+
+                count = 0
+                photos = []
+                for path in args.paths:
+                    path = path.expanduser().resolve()
+                    if path.suffix.lower() in {".mp4", ".mov", ".avi", ".mkv", ".webm", ".m4v"}:
+                        if args.group:
+                            raise ValueError(
+                                "Video groups are automatic; omit --group for video import"
+                            )
+                        count += import_video(directory, path, interval=args.interval)
+                    else:
+                        photos.append(path)
+                if photos:
+                    count += import_images(directory, photos, group=args.group)
+                print(f"Imported {count} new examples. Run make label.")
+                return 0
+            if args.command == "fetch":
+                from dmotion.download import fetch_images
+
+                report = fetch_images(directory, args.sources, limit=args.limit)
+                return 0 if report["downloaded"] else 1
+            if args.command == "build-dataset":
+                print(export_dataset(Dataset(directory), config.root / "data/yolo"))
+                return 0
+            if args.command == "train":
+                from dmotion.training import train_model
+
+                model = train_model(
+                    config,
+                    directory,
+                    epochs=args.epochs,
+                    image_size=args.image_size,
+                    device=args.device,
+                )
+                print(f"Saved {model}. Test it with make trained.")
+                return 0
         if args.command == "doctor":
             return doctor(config)
         if args.command == "prepare":

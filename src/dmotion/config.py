@@ -9,6 +9,7 @@ from pathlib import Path
 @dataclass(frozen=True)
 class DetectorConfig:
     model: str = "models/yolov8s-worldv2.pt"
+    backend: str = "world"
     prompts: tuple[str, ...] = ("a fan of banknotes", "banknotes", "cash money")
     confidence: float = 0.25
     image_size: int = 416
@@ -66,8 +67,28 @@ def apply_mode(config: AppConfig, mode: str) -> AppConfig:
     if mode == "check":
         return replace(
             config,
-            detector=replace(config.detector, prompts=CHECK_PROMPTS, confidence=0.25),
+            detector=replace(
+                config.detector,
+                model=(
+                    DetectorConfig().model
+                    if config.detector.backend == "trained"
+                    else config.detector.model
+                ),
+                backend="world",
+                prompts=CHECK_PROMPTS,
+                confidence=0.25,
+            ),
             trigger=replace(config.trigger, consecutive_hits=1),
+        )
+    if mode == "trained":
+        return replace(
+            config,
+            detector=replace(
+                config.detector,
+                model="models/money-spread.pt",
+                backend="trained",
+                image_size=640,
+            ),
         )
     raise ValueError(f"Unknown detection mode: {mode}")
 
@@ -93,6 +114,8 @@ def validate(config: AppConfig) -> AppConfig:
         raise ValueError("detector.model must be a nonempty path")
     if not isinstance(d.device, str) or not d.device.strip():
         raise ValueError("detector.device must be a nonempty string")
+    if not isinstance(d.backend, str) or d.backend not in {"world", "trained"}:
+        raise ValueError("detector.backend must be world or trained")
     if not d.prompts or any(not isinstance(p, str) or not p.strip() for p in d.prompts):
         raise ValueError("detector.prompts must contain nonempty strings")
     _number(d.confidence, "detector.confidence", 0.0, 1.0)

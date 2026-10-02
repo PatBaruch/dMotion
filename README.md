@@ -1,11 +1,12 @@
 # dMotion
 
 A local laptop experiment: show a fan of banknotes to the webcam, get a white box
-around detected cash, and hear an alert. Python, OpenCV, YOLO-World, and Pygame.
+around detected cash, and hear an alert. Python, OpenCV, Ultralytics YOLO, and Pygame.
 
 **Detection is experimental.** The pretrained model uses text prompts and may
 detect a single banknote or closed stack too. It has not been trained to distinguish
-the money-spread gesture. Start with your own photos to find out whether it is useful.
+the money-spread gesture. The training workflow below teaches a separate detector
+what a money spread looks like using examples you review.
 
 ## Start on this laptop
 
@@ -103,6 +104,45 @@ a three-second cooldown also applies. One background inference worker keeps the
 preview responsive and avoids queuing old frames. Results older than two seconds
 are discarded; increase `camera.max_result_age_seconds` if your device is slower.
 
+## Train it to recognize money spreads
+
+Training means showing the model photos and marking where the money fan is.
+Downloading photos alone does not teach it anything: review each photo and draw
+one box around the **whole fan of banknotes**. Mark photos without a fan as
+negative examples, including single notes, closed stacks, cards, and empty hands.
+
+```sh
+make fetch    # Download the included starter image sources for review.
+make collect  # Capture a short webcam session as photos, roughly one per second.
+make label    # Open the local labeling page in your browser.
+make dataset  # Show how many photos have been reviewed.
+make train    # Build separate training/validation/test sets and train the model.
+make trained  # Test the trained model with the webcam.
+```
+
+You can also double-click `collect.command`, `label.command`, `train.command`,
+and `trained.command` in Finder. Collection and downloads create **unreviewed**
+photos; they are excluded from training until you label them. Google examples are
+a small starter set. Add your own euros, lighting, camera angles, and backgrounds
+to make the model useful on your laptop.
+
+The starter dataset on this laptop has six reviewed photos: three Google/Pinterest
+money spreads, your euro photo, and two photos without money. This is enough to
+check that the training pipeline runs. A model trained on this tiny set is an
+experiment; it still needs more varied examples and webcam testing.
+
+Record at least three separate sessions containing money spreads, plus sessions
+without them. The workflow keeps each session together when splitting the data,
+so neighboring frames do not appear in both training and testing. Aim initially
+for roughly 100–200 varied positive photos and a similar number of negatives;
+that is a starting target, not an accuracy guarantee. Training explains what is
+missing if there are too few reviewed groups.
+
+`make trained` needs a successfully trained `models/money-spread.pt`. `make run`
+still runs the original prompt model, and `make diagnose` checks common objects.
+Follow the [step-by-step training guide](docs/TRAINING.md) for labeling, importing
+videos, adding download sources, and interpreting the results.
+
 ## Maintenance
 
 ```sh
@@ -122,13 +162,14 @@ config.toml        Shared defaults
 assets/            Your alert clip
 models/            Detector weights (ignored)
 weights/           Text-encoder weights (ignored)
-data/              Local testing photos (ignored)
+data/              Local testing photos and reviewed training data (ignored)
 outputs/           Annotated results (ignored)
 ```
 
-Inference stays on the laptop. Webcam frames are not recorded automatically; S
-saves a single photo when you request it. Weights, photos, outputs, environments,
-and caches are excluded from version control.
+Inference and training stay on the laptop. During normal detection, S saves a
+single photo when you request it; the separate collection command saves a short
+sequence for labeling. Weights, photos, outputs, environments, and caches are
+excluded from version control.
 
 ## Troubleshooting
 
@@ -137,7 +178,7 @@ and caches are excluded from version control.
 | Cannot open camera | Check macOS permission, close other camera apps, try `--camera 1` |
 | First launch is slow | Run `make prepare`; initial downloads and warm-up take time |
 | No money detection | Run `make diagnose` and stand in view; if it detects you, test a clear close-up money photo, different prompts, or lower confidence |
-| Single notes trigger | This model detects cash; add a custom spread dataset for that distinction |
+| Single notes trigger | Label single notes as negatives and train the custom spread detector |
 | Preview works but boxes never appear | Check model status and processed-frame count; if results are too slow, try a smaller `image_size` or increase the maximum result age |
 | MPS error | Run with `--device cpu` |
 | No audio | Run `make sound`, check volume/output device, verify your WAV file |
