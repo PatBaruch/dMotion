@@ -44,6 +44,14 @@ confirms that the camera-to-model pipeline works. If check mode works but money
 mode misses your cash, the money prompts or pretrained model are the likely issue.
 Money mode remains the default: use `make run` or `--mode money` to return to it.
 
+For a more sensitive cash test, close check mode with Q, then double-click
+`test-money.command` in Finder (or run `make test-money`). It uses the original
+model with the prompt `paper money` at confidence `0.10` on CPU. This setting found
+the fan in the uploaded euro photo; it can also trigger on unrelated objects or
+single notes. Hold the fan clearly in view for two seconds, remove it, then show
+empty hands and a single note to check for false alarms. Press T to test sound and
+S to save a missed example. This shortcut does not use the six-photo starter model.
+
 The overlay shows model warm-up, whether the model is running, and the number of
 processed frames. After warm-up, it distinguishes no objects, detected objects,
 and results that are too slow to display. A rising frame count with no objects

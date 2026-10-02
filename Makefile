@@ -1,4 +1,4 @@
-.PHONY: setup prepare run diagnose demo doctor sound image fetch collect label dataset build-dataset train trained check format
+.PHONY: setup prepare run diagnose test-money demo doctor sound image fetch collect label dataset build-dataset train trained check format
 
 setup:
 	sh scripts/setup.sh
@@ -11,6 +11,9 @@ run:
 
 diagnose:
 	.venv/bin/dmotion run --mode check
+
+test-money:
+	.venv/bin/dmotion run --prompt "paper money" --confidence 0.1 --device cpu
 
 fetch:
 	.venv/bin/dmotion fetch examples/money-spread-sources.json
