@@ -12,6 +12,9 @@ class DetectorConfig:
     backend: str = "world"
     prompts: tuple[str, ...] = ("a fan of banknotes", "banknotes", "cash money")
     confidence: float = 0.25
+    # Trained-mode confidence is calibrated separately from the experimental
+    # text-prompt detector.  CLI --confidence still overrides it for a run.
+    trained_confidence: float = 0.175
     image_size: int = 416
     device: str = "auto"
 
@@ -88,6 +91,7 @@ def apply_mode(config: AppConfig, mode: str) -> AppConfig:
                 model="models/money-spread.pt",
                 backend="trained",
                 image_size=640,
+                confidence=config.detector.trained_confidence,
             ),
         )
     raise ValueError(f"Unknown detection mode: {mode}")
@@ -119,6 +123,7 @@ def validate(config: AppConfig) -> AppConfig:
     if not d.prompts or any(not isinstance(p, str) or not p.strip() for p in d.prompts):
         raise ValueError("detector.prompts must contain nonempty strings")
     _number(d.confidence, "detector.confidence", 0.0, 1.0)
+    _number(d.trained_confidence, "detector.trained_confidence", 0.0, 1.0)
     _integer(d.image_size, "detector.image_size", 32)
     if d.image_size % 32:
         raise ValueError("detector.image_size must be a multiple of 32")

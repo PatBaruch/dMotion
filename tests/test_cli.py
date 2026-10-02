@@ -92,6 +92,20 @@ def test_trained_mode_uses_custom_backend(monkeypatch):
     assert received["checking"] is False
 
 
+def test_trained_mode_confidence_can_be_overridden(monkeypatch):
+    received = {}
+
+    def camera(config, *, demo, checking):
+        received.update(config=config)
+        return 0
+
+    monkeypatch.setitem(
+        sys.modules, "dmotion.app", SimpleNamespace(run_camera=camera, run_image=None)
+    )
+    assert main(["run", "--mode", "trained", "--confidence", "0.2"]) == 0
+    assert received["config"].detector.confidence == 0.2
+
+
 @pytest.mark.parametrize(("arguments", "expected"), [([], 10), (["--patience", "30"], 30)])
 def test_training_patience_reaches_training_function(monkeypatch, tmp_path, arguments, expected):
     received = {}

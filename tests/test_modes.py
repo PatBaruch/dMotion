@@ -66,7 +66,19 @@ def test_trained_mode_loads_custom_category_and_check_can_still_verify_common_ob
     assert trained.detector.backend == "trained"
     assert trained.detector.model == "models/money-spread.pt"
     assert trained.detector.image_size == 640
+    assert trained.detector.confidence == config.detector.trained_confidence
     checking = apply_mode(trained, "check")
     assert checking.detector.backend == "world"
     assert checking.detector.model == config.detector.model
     assert checking.detector.prompts[0] == "person"
+
+
+def test_trained_mode_uses_separate_calibrated_confidence(tmp_path):
+    config = AppConfig(root=tmp_path)
+    config = replace(
+        config,
+        detector=replace(config.detector, confidence=0.4, trained_confidence=0.19),
+    )
+    trained = apply_mode(config, "trained")
+    assert trained.detector.confidence == 0.19
+    assert config.detector.confidence == 0.4

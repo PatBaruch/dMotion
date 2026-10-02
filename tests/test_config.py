@@ -24,9 +24,10 @@ def test_paths_resolve_against_config_file_not_working_directory(tmp_path, monke
 
 
 @pytest.mark.parametrize("value", [-0.1, 1.1, "high", True, float("nan")])
-def test_rejects_invalid_confidence(value, tmp_path):
+@pytest.mark.parametrize("field", ["confidence", "trained_confidence"])
+def test_rejects_invalid_confidence(value, field, tmp_path):
     config = AppConfig(root=tmp_path)
-    config = replace(config, detector=replace(config.detector, confidence=value))
+    config = replace(config, detector=replace(config.detector, **{field: value}))
     with pytest.raises(ValueError, match="confidence"):
         validate(config)
 

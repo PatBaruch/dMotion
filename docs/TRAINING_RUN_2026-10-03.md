@@ -11,7 +11,35 @@ examples; the internal class remains `money_spread`.
 Close an already-running camera window with Q before restarting so it loads the
 new weights.
 
-## Dataset and training
+## Current hard-negative retraining
+
+The active model is `spread-20261002-224505-ee790d`. It was trained from 95
+reviewed photos after adding 48 cash-free crops and four webcam regression crops
+from the false detections shown during testing. The local dataset now has two
+additional full webcam examples (one positive with a tight cash box and one
+negative) queued for the next retraining run. The group-preserving export used
+by this model contains:
+
+| Split | Images | Positive | Negative | Cash boxes |
+| --- | ---: | ---: | ---: | ---: |
+| Training | 42 | 16 | 26 | 27 |
+| Validation | 29 | 13 | 16 | 13 |
+| Test | 24 | 14 | 10 | 23 |
+
+The run completed 94 epochs and applied 1,033 optimizer updates at a positive
+learning rate. The saved model's untouched test metrics are precision 0.286,
+recall 0.522, and mAP50 0.296. These numbers are deliberately reported because
+the dataset is still small and the test scenes are difficult.
+
+Validation-only confidence calibration found that `0.175` matched all 13
+positive images and produced no detections on the 16 negative images. That value
+is now the trained-mode default; `--confidence` overrides it for a one-off test.
+On the four supplied webcam screenshots, the new setting removed the two
+cash-free face/body detections and detected the held-cash screenshot. One darker
+close-up cash screenshot remains a miss, so another webcam session is still
+needed before relying on the detector.
+
+## Earlier video-only run
 
 All 45 video frames were visually reviewed. Duplicate and oversized AI boxes
 were corrected; eight blurred or ambiguous frames were excluded. The final

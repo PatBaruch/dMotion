@@ -102,6 +102,8 @@ cp config.toml config.local.toml
 ```
 
 - Lower confidence accepts more guesses; increase it if you get false triggers.
+- `--mode trained` uses the separately calibrated `trained_confidence = 0.175`.
+  Pass `--confidence` to override that value for one test run.
 - `--prompt` replaces the defaults; repeat it to test multiple descriptions.
 - `--device cpu` runs inference on the processor. `--device mps` uses the Apple GPU;
   `--device auto` selects the available accelerator. CPU is a compatibility option,
@@ -141,18 +143,30 @@ make train    # Build separate training/validation/test sets and train the model
 make trained  # Test the trained model with the webcam.
 ```
 
+The reviewed photos are in `data/training/images/`. Their statuses and pixel
+boxes are recorded in `data/training/manifest.json`. The browser labeler is the
+easiest way to see the photo and its box together:
+
+```sh
+.venv/bin/dmotion label --dataset data/training
+```
+
+After `make train`, the exported copies are in `data/yolo/images/train/`,
+`data/yolo/images/val/`, and `data/yolo/images/test/`; the matching normalized
+YOLO label files are in the folders with the same names under `data/yolo/labels/`.
+
 You can also double-click `collect.command`, `label.command`, `train.command`,
 and `trained.command` in Finder. Collection and downloads create **unreviewed**
 photos; they are excluded from training until you label them. Google examples are
 a small starter set. Add your own euros, lighting, camera angles, and backgrounds
 to make the model useful on your laptop.
 
-The dataset on this laptop contains the six original photos and 45 frames from
-three videos. All video frames have been visually reviewed: 37 have corrected
-cash boxes and eight were excluded for blur or uncertain boundaries. There are
-43 usable photos in total, including two without money. Original images and
-review decisions are preserved locally. This remains a small experiment that
-needs more varied examples and webcam testing.
+The local dataset currently contains 97 reviewed photos: 44 positive cash photos
+and 53 cash-free photos. It includes the original photos, reviewed video frames,
+manually checked cash-free crops from the false-alarm screenshots, and two full
+webcam examples queued for the next retraining run. Eight ambiguous or blurry
+records remain excluded. Original images and review decisions are preserved
+locally. This remains a small experiment that needs more varied webcam sessions.
 
 The training setup now updates weights every batch and records actual optimizer
 updates. It refuses to replace the model if there were no updates at a positive
@@ -160,11 +174,13 @@ learning rate. Each run records the exact photos, splits and learning updates.
 `make trained` loads the latest completed model; `make test-money` uses the
 original prompt detector.
 
-The video-based model was trained and checked on 3 October 2026. It detects the
-uploaded euro photo and cash in the separate fan-video examples, but still misses
-some held-out bed-video spreads and can draw extra boxes. Run `make trained` to
-test it with your webcam. See the [saved training results](docs/TRAINING_RUN_2026-10-03.md)
-for the exact dataset and checks.
+The active hard-negative model was trained and checked on 3 October 2026 using
+95 of those reviewed photos. On its validation split it matched all 13 cash
+images and produced no boxes on 16 cash-free images at the calibrated threshold.
+It still misses some wider or darker held-out scenes, and its box can include
+the person when the cash is small. Two full webcam examples are queued for the
+next retraining run. Run `make trained` and see the [saved training results](docs/TRAINING_RUN_2026-10-03.md)
+for exact checks.
 
 Record at least three separate sessions containing cash, plus sessions without
 cash. The workflow keeps each session together when splitting the data,
@@ -177,6 +193,19 @@ missing if there are too few reviewed groups.
 still runs the original prompt model, and `make diagnose` checks common objects.
 Follow the [step-by-step training guide](docs/TRAINING.md) for labeling, importing
 videos, adding download sources, and interpreting the results.
+
+When a shirt or another object triggers falsely, press `S` in the camera window
+to save that exact frame, press `Q`, and import the newest saved photo as a
+negative example:
+
+```sh
+latest=$(ls -t data/test-*.jpg | head -1)
+.venv/bin/dmotion import "$latest" --dataset data/training --group shirt-false-positive
+.venv/bin/dmotion label --dataset data/training
+```
+
+Choose **No cash + next** for that frame. Saving the photo alone does not change
+the model; it must be reviewed as a negative and included in a later training run.
 
 ## Maintenance
 

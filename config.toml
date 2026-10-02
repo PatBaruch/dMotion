@@ -5,6 +5,8 @@ backend = "world" # use --mode trained after training your own model
 # These are experimental text prompts, not a trained money-spread category.
 prompts = ["a fan of banknotes", "banknotes", "cash money"]
 confidence = 0.25
+# Used by --mode trained; --confidence overrides it for one run.
+trained_confidence = 0.175
 image_size = 416
 device = "auto" # auto, cpu, mps, or cuda:0
 
