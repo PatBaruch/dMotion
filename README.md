@@ -46,8 +46,9 @@ Money mode remains the default: use `make run` or `--mode money` to return to it
 
 For a more sensitive cash test, close check mode with Q, then double-click
 `test-money.command` in Finder (or run `make test-money`). It uses the original
-model with the prompt `paper money` at confidence `0.10` on CPU. This setting found
-the fan in the uploaded euro photo; it can also trigger on unrelated objects or
+model with the prompt `paper money` at confidence `0.10`, image size `640`, on CPU.
+The larger image raised the uploaded euro photo's score from `0.115` to `0.170`;
+live detection can still miss, and it can trigger on unrelated objects or
 single notes. Hold the fan clearly in view for two seconds, remove it, then show
 empty hands and a single note to check for false alarms. Press T to test sound and
 S to save a missed example. This shortcut does not use the six-photo starter model.
@@ -100,8 +101,11 @@ cp config.toml config.local.toml
 
 - Lower confidence accepts more guesses; increase it if you get false triggers.
 - `--prompt` replaces the defaults; repeat it to test multiple descriptions.
-- `device = "auto"` uses CUDA, Apple MPS, or CPU in that order. Try CPU if MPS fails.
-- `image_size` must be a multiple of 32. A smaller size can improve speed but miss details.
+- `--device cpu` runs inference on the processor. `--device mps` uses the Apple GPU;
+  `--device auto` selects the available accelerator. CPU is a compatibility option,
+  not an accuracy setting.
+- `--image-size 640` overrides `image_size`; use a multiple of 32. Larger images can
+  expose more detail but take longer to process.
 - `overlay.solid_box = true` covers detections with a filled white rectangle.
 - `trigger` settings control confirmation, absence before rearming, and cooldown.
 - Paths in a config file are relative to that file's folder.
@@ -138,6 +142,13 @@ The starter dataset on this laptop has six reviewed photos: three Google/Pintere
 money spreads, your euro photo, and two photos without money. This is enough to
 check that the training pipeline runs. A model trained on this tiny set is an
 experiment; it still needs more varied examples and webcam testing.
+
+The training setup now updates weights every batch and records actual optimizer
+updates. It refuses to replace the model if there were no updates at a positive
+learning rate. The corrected starter run made 11 such updates, but still missed
+the euro photo at both `0.25` and `0.10` confidence. Use `make test-money` for the
+current cash experiment; collect more examples before expecting `make trained`
+to work reliably.
 
 Record at least three separate sessions containing money spreads, plus sessions
 without them. The workflow keeps each session together when splitting the data,

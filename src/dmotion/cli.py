@@ -41,6 +41,9 @@ def parser() -> argparse.ArgumentParser:
                 help="check detects common objects to verify the model works",
             )
             command.add_argument("--confidence", type=float)
+            command.add_argument(
+                "--image-size", type=int, help="Inference image size; use a multiple of 32"
+            )
             command.add_argument("--device")
             command.add_argument("--model", help="Override the model path for the selected mode")
             command.add_argument(
@@ -115,7 +118,7 @@ def main(argv: list[str] | None = None) -> int:
             if args.mode == "check":
                 logging.info("AI check mode: look for a person, phone, cup, bottle, or book")
         overrides = {}
-        for name in ("confidence", "device", "model"):
+        for name in ("confidence", "image_size", "device", "model"):
             if getattr(args, name, None) is not None:
                 overrides[name] = getattr(args, name)
         if getattr(args, "prompt", None):

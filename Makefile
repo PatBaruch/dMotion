@@ -13,7 +13,7 @@ diagnose:
 	.venv/bin/dmotion run --mode check
 
 test-money:
-	.venv/bin/dmotion run --prompt "paper money" --confidence 0.1 --device cpu
+	.venv/bin/dmotion run --prompt "paper money" --confidence 0.1 --image-size 640 --device cpu
 
 fetch:
 	.venv/bin/dmotion fetch examples/money-spread-sources.json

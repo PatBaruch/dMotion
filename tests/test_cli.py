@@ -19,8 +19,9 @@ def test_repeated_prompts_are_supported():
     assert args.prompt == ["banknotes", "cash"]
 
 
-def test_invalid_override_fails_before_camera_or_model_load(capsys):
-    assert main(["run", "--confidence", "1.5"]) == 1
+@pytest.mark.parametrize("arguments", [["--confidence", "1.5"], ["--image-size", "641"]])
+def test_invalid_override_fails_before_camera_or_model_load(arguments):
+    assert main(["run", *arguments]) == 1
 
 
 def test_missing_config_produces_failure(tmp_path):
@@ -45,6 +46,8 @@ def test_check_mode_reaches_camera_with_user_overrides(monkeypatch):
                 "check",
                 "--confidence",
                 "0.1",
+                "--image-size",
+                "640",
                 "--camera",
                 "1",
                 "--mute",
@@ -56,6 +59,7 @@ def test_check_mode_reaches_camera_with_user_overrides(monkeypatch):
     assert received["demo"] is False
     assert "person" in received["config"].detector.prompts
     assert received["config"].detector.confidence == 0.1
+    assert received["config"].detector.image_size == 640
     assert received["config"].camera.index == 1
     assert received["config"].audio.enabled is False
 

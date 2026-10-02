@@ -63,20 +63,51 @@ def train_model(
     pretrained_path.parent.mkdir(parents=True, exist_ok=True)
     logger.info("Training reviewed spreads on %s; run %s", selected_device, run_name)
     model = YOLO(str(pretrained_path))
-    model.train(
-        data=str(data_path),
-        epochs=epochs,
-        imgsz=image_size,
-        device=selected_device,
-        batch=4,
-        workers=0,
-        patience=10,
-        pretrained=True,
-        seed=42,
-        project=str(project),
-        name=run_name,
-        exist_ok=False,
-        plots=False,
+    updates = {"optimizer_steps": 0, "positive_lr_optimizer_steps": 0}
+    step_hooks = []
+
+    def count_optimizer_step(optimizer, _arguments, _keywords):
+        updates["optimizer_steps"] += 1
+        if any(
+            math.isfinite(float(group["lr"])) and float(group["lr"]) > 0
+            for group in optimizer.param_groups
+        ):
+            updates["positive_lr_optimizer_steps"] += 1
+
+    def install_step_counter(trainer):
+        # A post-hook observes actual updates, including whether AMP skipped a step.
+        step_hooks.append(trainer.optimizer.register_step_post_hook(count_optimizer_step))
+
+    model.add_callback("on_train_start", install_step_counter)
+    try:
+        model.train(
+            data=str(data_path),
+            epochs=epochs,
+            imgsz=image_size,
+            device=selected_device,
+            batch=4,
+            nbs=4,  # Avoid accumulating many epochs before an update on small datasets.
+            workers=0,
+            patience=10,
+            pretrained=True,
+            seed=42,
+            project=str(project),
+            name=run_name,
+            exist_ok=False,
+            plots=False,
+        )
+    finally:
+        for handle in step_hooks:
+            handle.remove()
+    if not updates["positive_lr_optimizer_steps"]:
+        raise RuntimeError(
+            "Training produced no optimizer updates at a positive learning rate; "
+            "model was not saved"
+        )
+    logger.info(
+        "Training applied %s optimizer steps, %s at a positive learning rate",
+        updates["optimizer_steps"],
+        updates["positive_lr_optimizer_steps"],
     )
     best = Path(model.trainer.best)
     if not best.is_file():
@@ -114,6 +145,7 @@ def train_model(
         "dataset": str(data_path),
         "requested_epochs": epochs,
         "completed_epochs": int(model.trainer.epoch) + 1,
+        **updates,
         "image_size": image_size,
         "device": selected_device,
         "splits": export_report["splits"],
