@@ -1,5 +1,7 @@
 import json
 import sys
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -198,3 +200,72 @@ def test_export_detects_modified_source_and_leaves_previous_export_intact(tmp_pa
     with pytest.raises(ValueError, match="changed since import"):
         export_dataset(dataset, output)
     assert (output / "export-report.json").read_bytes() == before
+
+
+@pytest.mark.parametrize("operation", ["suggest", "import"])
+def test_concurrent_ai_or_import_and_review_keep_both_updates(tmp_path, monkeypatch, operation):
+    writer = Dataset(tmp_path / "dataset")
+    reviewed = add_sample(writer, tmp_path, "review-me")
+    if operation == "suggest":
+        pending = add_sample(writer, tmp_path, "suggest-me")
+    else:
+        imported = tmp_path / "new-image.jpg"
+        imported.write_bytes(b"a new imported picture")
+    reviewer = Dataset(writer.directory)
+    snapshot_loaded = threading.Event()
+    release_writer = threading.Event()
+    review_started = threading.Event()
+    review_finished = threading.Event()
+    original_records = writer.records
+
+    def paused_snapshot():
+        records = original_records()
+        snapshot_loaded.set()
+        if not release_writer.wait(timeout=5):
+            raise TimeoutError("Test did not release the paused writer")
+        return records
+
+    monkeypatch.setattr(writer, "records", paused_snapshot)
+
+    def write_other_record():
+        if operation == "suggest":
+            return writer.suggest(
+                pending["id"],
+                {
+                    "boxes": [[10, 20, 50, 60]],
+                    "scores": [0.8],
+                    "labels": ["paper money"],
+                    "model": "test-model",
+                    "prompts": ["paper money"],
+                    "created_at": "2026-10-03T00:00:00+00:00",
+                },
+            )
+        return writer.add_image(imported, group="new-session", width=100, height=80)
+
+    def accept_review():
+        review_started.set()
+        result = reviewer.review(reviewed["id"], status="negative", boxes=[])
+        review_finished.set()
+        return result
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        other_future = executor.submit(write_other_record)
+        try:
+            assert snapshot_loaded.wait(timeout=2)
+            review_future = executor.submit(accept_review)
+            assert review_started.wait(timeout=2)
+            # The second instance must wait while the first owns an old manifest snapshot.
+            assert not review_finished.wait(timeout=0.1)
+        finally:
+            release_writer.set()
+        other = other_future.result(timeout=2)
+        review_future.result(timeout=2)
+
+    reloaded = Dataset(writer.directory)
+    assert reloaded.get_record(reviewed["id"])["status"] == "negative"
+    assert reloaded.get_record(other["id"])["status"] == "unreviewed"
+    assert reloaded.summary()["total"] == 2
+    if operation == "suggest":
+        assert reloaded.get_record(pending["id"])["suggestion"]["boxes"] == [[10, 20, 50, 60]]
+    else:
+        assert reloaded.image_path(other).read_bytes() == imported.read_bytes()

@@ -6,17 +6,64 @@ never silently turn an unreviewed internet photo into a negative example.
 
 import hashlib
 import json
+import math
 import os
 import random
 import shutil
 import tempfile
 from collections import Counter
 from copy import deepcopy
+from functools import wraps
 from io import BytesIO
 from pathlib import Path
 
+from filelock import FileLock
+
 STATUSES = {"unreviewed", "positive", "negative", "excluded"}
 IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png", ".webp", ".bmp"}
+
+
+def _serialized_mutation(method):
+    """Serialize complete manifest updates across browser, import and AI processes."""
+
+    @wraps(method)
+    def locked(self, *args, **kwargs):
+        with self._manifest_lock:
+            return method(self, *args, **kwargs)
+
+    return locked
+
+
+def _validate_suggestion(suggestion: dict, width: int, height: int) -> None:
+    if not isinstance(suggestion, dict):
+        raise ValueError("An AI suggestion must be an object")
+    boxes = suggestion.get("boxes")
+    _validate_boxes("positive" if boxes else "unreviewed", boxes, width, height)
+    scores, labels = suggestion.get("scores"), suggestion.get("labels")
+    if not isinstance(scores, list) or len(scores) != len(boxes):
+        raise ValueError("Each suggested box needs a confidence score")
+    if any(
+        isinstance(score, bool)
+        or not isinstance(score, (int, float))
+        or not 0 <= score <= 1
+        or not math.isfinite(score)
+        for score in scores
+    ):
+        raise ValueError("Suggestion confidence scores must be between 0 and 1")
+    if not isinstance(labels, list) or len(labels) != len(boxes):
+        raise ValueError("Each suggested box needs a label")
+    if any(not isinstance(label, str) or not label.strip() for label in labels):
+        raise ValueError("Suggestion labels must be nonempty strings")
+    for field in ("model", "created_at"):
+        if not isinstance(suggestion.get(field), str) or not suggestion[field].strip():
+            raise ValueError(f"Suggestion {field} must be a nonempty string")
+    prompts = suggestion.get("prompts")
+    if (
+        not isinstance(prompts, list)
+        or not prompts
+        or any(not isinstance(prompt, str) or not prompt.strip() for prompt in prompts)
+    ):
+        raise ValueError("Suggestion prompts must be nonempty strings")
 
 
 def _write_json(path: Path, value: object) -> None:
@@ -42,7 +89,7 @@ def _validate_boxes(status: str, boxes: list[list[int]], width: int, height: int
     if status != "positive" and boxes:
         raise ValueError(f"{status} images cannot have boxes")
     if status == "positive" and not boxes:
-        raise ValueError("A positive image needs a box around each whole money spread")
+        raise ValueError("A positive image needs a box around each cash bundle or single bill")
     for box in boxes:
         if not isinstance(box, list) or len(box) != 4 or any(type(v) is not int for v in box):
             raise ValueError("Each box must contain four integer pixel coordinates: x1,y1,x2,y2")
@@ -56,9 +103,11 @@ class Dataset:
         self.directory = Path(directory).expanduser().resolve()
         self.manifest_path = self.directory / "manifest.json"
         (self.directory / "images").mkdir(parents=True, exist_ok=True)
-        if not self.manifest_path.exists():
-            _write_json(self.manifest_path, {"version": 1, "records": []})
-        self.records()  # Report a corrupt or incompatible manifest immediately.
+        self._manifest_lock = FileLock(self.directory / ".manifest.lock")
+        with self._manifest_lock:
+            if not self.manifest_path.exists():
+                _write_json(self.manifest_path, {"version": 1, "records": []})
+            self.records()  # Report a corrupt or incompatible manifest immediately.
 
     def records(self) -> list[dict]:
         raw = json.loads(self.manifest_path.read_text(encoding="utf-8"))
@@ -88,6 +137,8 @@ class Dataset:
             _validate_boxes(
                 record["status"], record.get("boxes"), record["width"], record["height"]
             )
+            if "suggestion" in record:
+                _validate_suggestion(record["suggestion"], record["width"], record["height"])
         return records
 
     def get_record(self, id: str) -> dict:
@@ -103,6 +154,7 @@ class Dataset:
             raise ValueError("Dataset image paths must stay inside the images folder")
         return target
 
+    @_serialized_mutation
     def add_image(
         self,
         path: Path,
@@ -167,6 +219,7 @@ class Dataset:
         _write_json(self.manifest_path, {"version": 1, "records": records})
         return deepcopy(record)
 
+    @_serialized_mutation
     def review(self, id: str, *, status: str, boxes: list[list[int]]) -> dict:
         records = self.records()
         for record in records:
@@ -175,6 +228,21 @@ class Dataset:
             _validate_boxes(status, boxes, record["width"], record["height"])
             record["status"] = status
             record["boxes"] = deepcopy(boxes)
+            _write_json(self.manifest_path, {"version": 1, "records": records})
+            return deepcopy(record)
+        raise ValueError(f"No dataset image with ID {id}")
+
+    @_serialized_mutation
+    def suggest(self, id: str, suggestion: dict) -> dict:
+        """Save AI drafts without changing reviewed labels or making training examples."""
+        records = self.records()
+        for record in records:
+            if record["id"] != id:
+                continue
+            if record["status"] != "unreviewed":
+                raise ValueError("AI suggestions cannot replace a reviewed picture")
+            _validate_suggestion(suggestion, record["width"], record["height"])
+            record["suggestion"] = deepcopy(suggestion)
             _write_json(self.manifest_path, {"version": 1, "records": records})
             return deepcopy(record)
         raise ValueError(f"No dataset image with ID {id}")
@@ -190,6 +258,9 @@ class Dataset:
             "positive_groups": len(
                 {record["group"] for record in records if record["status"] == "positive"}
             ),
+            "ai_suggested": sum(
+                record["status"] == "unreviewed" and "suggestion" in record for record in records
+            ),
         }
 
 
@@ -197,7 +268,7 @@ def _split_groups(records: list[dict], seed: int) -> dict[str, str]:
     positive = sorted({record["group"] for record in records if record["status"] == "positive"})
     if len(positive) < 3:
         raise ValueError(
-            "Training needs reviewed money spreads from at least 3 independent groups "
+            "Training needs reviewed cash from at least 3 independent groups "
             "(different recording sessions or source shoots). Review more images first."
         )
     randomizer = random.Random(seed)

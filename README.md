@@ -1,12 +1,13 @@
 # dMotion
 
-A local laptop experiment: show a fan of banknotes to the webcam, get a white box
-around detected cash, and hear an alert. Python, OpenCV, Ultralytics YOLO, and Pygame.
+A local laptop experiment: show cash to the webcam, get a white box around the
+banknotes, and hear an alert. Fans, stacks, and single bills count as cash.
+Python, OpenCV, Ultralytics YOLO, and Pygame.
 
-**Detection is experimental.** The pretrained model uses text prompts and may
-detect a single banknote or closed stack too. It has not been trained to distinguish
-the money-spread gesture. The training workflow below teaches a separate detector
-what a money spread looks like using examples you review.
+**Detection is experimental.** The pretrained model guesses from text prompts.
+The training workflow below teaches a separate detector to recognize displayed
+cash using examples you review. Its internal class name remains `money_spread`
+to keep existing models and commands compatible.
 
 ## Start on this laptop
 
@@ -48,9 +49,10 @@ For a more sensitive cash test, close check mode with Q, then double-click
 `test-money.command` in Finder (or run `make test-money`). It uses the original
 model with the prompt `paper money` at confidence `0.10`, image size `640`, on CPU.
 The larger image raised the uploaded euro photo's score from `0.115` to `0.170`;
-live detection can still miss, and it can trigger on unrelated objects or
-single notes. Hold the fan clearly in view for two seconds, remove it, then show
-empty hands and a single note to check for false alarms. Press T to test sound and
+live detection can still miss, and it can trigger on unrelated objects.
+Hold cash clearly in view for two seconds, remove it, then show empty hands and
+cards to check for false alarms. Try a fan, stack, and single bill separately.
+Press T to test sound and
 S to save a missed example. This shortcut does not use the six-photo starter model.
 
 The overlay shows model warm-up, whether the model is running, and the number of
@@ -116,12 +118,19 @@ a three-second cooldown also applies. One background inference worker keeps the
 preview responsive and avoids queuing old frames. Results older than two seconds
 are discarded; increase `camera.max_result_age_seconds` if your device is slower.
 
-## Train it to recognize money spreads
+## Train it to recognize displayed cash
 
-Training means showing the model photos and marking where the money fan is.
+To create labels from recorded videos with AI, see the
+[automatic video labeling workflow](docs/TRAINING.md#use-ai-to-suggest-boxes-from-videos).
+`make auto-label` proposes cash boxes for review; the labeler accepts money fans,
+stacks, and single bills for the broader cash-display task. AI drafts do not enter
+training until accepted, and previously reviewed pictures are preserved.
+
+Training means showing the model photos and marking where the cash is.
 Downloading photos alone does not teach it anything: review each photo and draw
-one box around the **whole fan of banknotes**. Mark photos without a fan as
-negative examples, including single notes, closed stacks, cards, and empty hands.
+one tight box around each cash bundle or single bill. For a fan or stack, include
+all its banknotes in one box. Mark photos without cash as negative examples,
+including cards, receipts, phones, and empty hands.
 
 ```sh
 make fetch    # Download the included starter image sources for review.
@@ -150,8 +159,8 @@ the euro photo at both `0.25` and `0.10` confidence. Use `make test-money` for t
 current cash experiment; collect more examples before expecting `make trained`
 to work reliably.
 
-Record at least three separate sessions containing money spreads, plus sessions
-without them. The workflow keeps each session together when splitting the data,
+Record at least three separate sessions containing cash, plus sessions without
+cash. The workflow keeps each session together when splitting the data,
 so neighboring frames do not appear in both training and testing. Aim initially
 for roughly 100–200 varied positive photos and a similar number of negatives;
 that is a starting target, not an accuracy guarantee. Training explains what is
@@ -197,7 +206,7 @@ excluded from version control.
 | Cannot open camera | Check macOS permission, close other camera apps, try `--camera 1` |
 | First launch is slow | Run `make prepare`; initial downloads and warm-up take time |
 | No money detection | Run `make diagnose` and stand in view; if it detects you, test a clear close-up money photo, different prompts, or lower confidence |
-| Single notes trigger | Label single notes as negatives and train the custom spread detector |
+| Cards or background objects trigger | Add reviewed examples of those objects with no cash boxes, then train again |
 | Preview works but boxes never appear | Check model status and processed-frame count; if results are too slow, try a smaller `image_size` or increase the maximum result age |
 | MPS error | Run with `--device cpu` |
 | No audio | Run `make sound`, check volume/output device, verify your WAV file |

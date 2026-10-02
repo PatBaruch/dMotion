@@ -114,9 +114,9 @@ def record_camera(
                 lines = [
                     f"Recording: {remaining:.0f}s left | {saved} frames saved",
                     (
-                        "Show empty hands, single bills, stacks and cards. Q = finish."
+                        "Show empty hands, cards, receipts and phones. Q = finish."
                         if kind == "negative"
-                        else "Move the fan; change angle, distance and lighting. Q = finish."
+                        else "Move cash; change angle, distance and lighting. Q = finish."
                     ),
                     f"{kind.capitalize()} examples | Review every saved frame before training.",
                 ]

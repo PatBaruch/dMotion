@@ -1,7 +1,10 @@
-.PHONY: setup prepare run diagnose test-money demo doctor sound image fetch collect label dataset build-dataset train trained check format
+.PHONY: setup setup-labeling prepare run diagnose test-money demo doctor sound image fetch collect auto-label label dataset build-dataset train trained check format
 
 setup:
 	sh scripts/setup.sh
+
+setup-labeling:
+	.tools/bin/uv sync --locked --extra vision --extra labeling --cache-dir "$(CURDIR)/.cache/uv"
 
 prepare:
 	.venv/bin/dmotion prepare
@@ -20,6 +23,9 @@ fetch:
 
 collect:
 	.venv/bin/dmotion collect
+
+auto-label:
+	.venv/bin/dmotion auto-label --engine grounding --confidence 0.2 --prompt banknotes --prompt "dollar bills" --prompt "cash money"
 
 label:
 	.venv/bin/dmotion label

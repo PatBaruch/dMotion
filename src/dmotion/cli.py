@@ -27,19 +27,21 @@ def parser() -> argparse.ArgumentParser:
         ("label", "Review and draw money-spread boxes in your browser"),
         ("collect", "Save webcam examples automatically"),
         ("import", "Import photos, folders, or video frames"),
+        ("auto-label", "Suggest cash boxes for unreviewed pictures using local AI"),
         ("fetch", "Download a curated JSON list of image URLs"),
         ("build-dataset", "Export reviewed examples to grouped YOLO splits"),
         ("train", "Train a small money-spread model from reviewed examples"),
     ]:
         command = commands.add_parser(name, help=help_text)
         command.add_argument("--config", type=Path, default=Path("config.toml"))
-        if name in {"run", "image", "prepare"}:
-            command.add_argument(
-                "--mode",
-                choices=("money", "check", "trained"),
-                default="money",
-                help="check detects common objects to verify the model works",
-            )
+        if name in {"run", "image", "prepare", "auto-label"}:
+            if name != "auto-label":
+                command.add_argument(
+                    "--mode",
+                    choices=("money", "check", "trained"),
+                    default="money",
+                    help="check detects common objects to verify the model works",
+                )
             command.add_argument("--confidence", type=float)
             command.add_argument(
                 "--image-size", type=int, help="Inference image size; use a multiple of 32"
@@ -57,8 +59,21 @@ def parser() -> argparse.ArgumentParser:
             command.add_argument("source", type=Path)
             command.add_argument("--output", type=Path)
             command.add_argument("--show", action="store_true")
-        if name in {"dataset", "label", "collect", "import", "fetch", "build-dataset", "train"}:
+        if name in {
+            "dataset",
+            "label",
+            "collect",
+            "import",
+            "auto-label",
+            "fetch",
+            "build-dataset",
+            "train",
+        }:
             command.add_argument("--dataset", type=Path, default=Path("data/training"))
+        if name == "auto-label":
+            command.set_defaults(confidence=0.1, image_size=640, device="cpu")
+            command.add_argument("--output", type=Path)
+            command.add_argument("--engine", choices=("world", "grounding"), default="world")
         if name == "label":
             command.add_argument("--port", type=int, default=0)
             command.add_argument("--no-browser", action="store_true")
@@ -113,6 +128,22 @@ def main(argv: list[str] | None = None) -> int:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
     try:
         config = load_config(args.config)
+        if args.command == "auto-label":
+            from dmotion.config import DetectorConfig
+
+            config = replace(
+                config,
+                detector=replace(
+                    config.detector,
+                    backend="world",
+                    model=(
+                        config.detector.model
+                        if config.detector.backend == "world"
+                        else DetectorConfig().model
+                    ),
+                    prompts=("paper money",),
+                ),
+            )
         if getattr(args, "mode", None):
             config = apply_mode(config, args.mode)
             if args.mode == "check":
@@ -141,6 +172,12 @@ def main(argv: list[str] | None = None) -> int:
                 from dmotion.labeler import run_labeler
 
                 return run_labeler(directory, open_browser=not args.no_browser, port=args.port)
+            if args.command == "auto-label":
+                from dmotion.autolabel import auto_label
+
+                report = auto_label(config, directory, output=args.output, engine=args.engine)
+                print(f"AI suggestions saved. Open make label to review. Report: {report}")
+                return 0
             if args.command == "collect":
                 from dmotion.collect import record_camera
 

@@ -6,7 +6,7 @@ from types import SimpleNamespace
 import pytest
 
 from dmotion.config import AppConfig
-from dmotion.dataset import Dataset
+from dmotion.dataset import Dataset, export_dataset
 from dmotion.training import train_model
 
 
@@ -116,6 +116,64 @@ def test_evaluation_failure_does_not_replace_previous_model(tmp_path, monkeypatc
     with pytest.raises(RuntimeError, match="evaluation failed"):
         train_model(AppConfig(root=tmp_path), dataset.directory, epochs=1)
     assert destination.read_bytes() == b"previous model"
+
+
+def test_pending_ai_labels_fail_before_export_or_heavy_imports(tmp_path, monkeypatch):
+    dataset = small_dataset(tmp_path)
+    export_directory = tmp_path / "data" / "yolo"
+    export_dataset(dataset, export_directory)
+    existing_export = {
+        path.relative_to(export_directory): path.read_bytes()
+        for path in export_directory.rglob("*")
+        if path.is_file()
+    }
+    destination = tmp_path / "models" / "money-spread.pt"
+    destination.parent.mkdir()
+    destination.write_bytes(b"previous model")
+    metadata = destination.with_suffix(".json")
+    metadata.write_text('{"previous": true}')
+    for index, boxes in enumerate(([[10, 10, 90, 90]], [])):
+        source = tmp_path / f"pending-{index}.jpg"
+        source.write_bytes(f"pending image {index}".encode())
+        record = dataset.add_image(source, group="new-video", width=100, height=100)
+        dataset.suggest(
+            record["id"],
+            {
+                "boxes": boxes,
+                "scores": [0.8] * len(boxes),
+                "labels": ["cash money"] * len(boxes),
+                "model": "grounding-dino-tiny",
+                "prompts": ["cash money"],
+                "created_at": "2026-10-02T21:54:27+00:00",
+            },
+        )
+    monkeypatch.setitem(sys.modules, "torch", None)
+    monkeypatch.setitem(sys.modules, "ultralytics", None)
+    with pytest.raises(ValueError, match="2 AI-labeled pictures still need review.*make label"):
+        train_model(AppConfig(root=tmp_path), dataset.directory)
+    assert destination.read_bytes() == b"previous model"
+    assert json.loads(metadata.read_text()) == {"previous": True}
+    assert existing_export == {
+        path.relative_to(export_directory): path.read_bytes()
+        for path in export_directory.rglob("*")
+        if path.is_file()
+    }
+    assert not (tmp_path / ".cache").exists()
+
+
+def test_unreviewed_pictures_without_ai_drafts_do_not_block_training(tmp_path, monkeypatch):
+    dataset = small_dataset(tmp_path)
+    source = tmp_path / "later.jpg"
+    source.write_bytes(b"future unreviewed image")
+    pending = dataset.add_image(source, group="later-session", width=100, height=100)
+    fake_dependencies(monkeypatch)
+    destination = train_model(AppConfig(root=tmp_path), dataset.directory, epochs=1)
+    info = json.loads(destination.with_suffix(".json").read_text())
+    provenance = json.loads(
+        Path(info["checkpoint"]).parent.parent.joinpath("dataset-provenance.json").read_text()
+    )
+    assert len(provenance["records"]) == 3
+    assert pending["id"] not in {record["id"] for record in provenance["records"]}
 
 
 def test_counts_actual_optimizer_steps_instead_of_epochs(tmp_path, monkeypatch):

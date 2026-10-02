@@ -45,6 +45,12 @@ def train_model(
     if not isinstance(device, str) or not device.strip():
         raise ValueError("Training device must be auto, cpu, mps, or a CUDA device")
     dataset = Dataset(dataset_directory)
+    pending = dataset.summary()["ai_suggested"]
+    if pending:
+        raise ValueError(
+            f"{pending} AI-labeled pictures still need review. Run make label, "
+            "save correct cash boxes or mark no cash/skip, then train."
+        )
     data_path = export_dataset(dataset, config.root / "data" / "yolo")
     export_report = json.loads((data_path.parent / "export-report.json").read_text())
     for warning in export_report["warnings"]:

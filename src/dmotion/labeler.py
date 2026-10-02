@@ -5,6 +5,7 @@ import mimetypes
 import secrets
 import threading
 import webbrowser
+from copy import deepcopy
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -33,25 +34,28 @@ display:block;cursor:crosshair;touch-action:none}
 #counter{font-variant-numeric:tabular-nums}#status{font-weight:600;color:#dde6ff}
 .instructions{border-left:3px solid #7396eb;padding-left:13px;margin-top:16px}
 .shortcut{font-size:13px}.empty{padding:40px;text-align:center}kbd{color:#dae5ff}
+.suggestion{border:1px solid #a58c4e;background:#30281b;color:#ffe6a9;
+border-radius:8px;padding:10px 13px;margin:12px 0}
 @media(max-width:600px){body{padding:12px}button{padding:10px}.row{gap:6px}}
 </style></head><body>
 <div class="top"><div><h1>Review training pictures</h1><p id="progress">Loading…</p></div>
 <button id="finish">Finish labeling</button></div>
-<p class="instructions"><strong>Draw one box around the whole fan of banknotes.</strong>
-Keep the box tight around the money. Include all visible notes in that fan.
-For multiple fans, draw a separate box around each fan.</p>
-<p>Single bills, stacked cash, cards and empty hands count as <strong>No spread</strong>.
+<p class="instructions"><strong>Draw a tight box around each cash bundle or single bill.</strong>
+Include all visible notes in a fan or stack. For separate bundles, draw separate boxes.
+Money fans, stacks and single bills being displayed all count as <strong>Cash</strong>.</p>
+<p>Cards, receipts, phones and empty hands count as <strong>No cash</strong>.
 Skip pictures that are too blurry, unclear or unsuitable.</p>
 <div class="top"><span id="counter"></span><span id="status"></span></div>
+<div id="suggestion" class="suggestion" role="status" aria-live="polite" hidden></div>
 <div class="workspace"><canvas id="canvas" width="1000" height="563" tabindex="0"></canvas>
 <div id="empty" class="empty" hidden>No pictures to review.</div></div>
-<div class="row"><button id="positive" class="primary">Save spread + next</button>
-<button id="negative">No spread + next</button><button id="excluded">Skip + next</button>
+<div class="row"><button id="positive" class="primary">Save cash + next</button>
+<button id="negative">No cash + next</button><button id="excluded">Skip + next</button>
 <button id="undo">Undo box</button><button id="clear">Clear boxes</button></div>
 <div class="meta" id="metadata"></div><div id="notice" role="status" aria-live="polite"></div>
 <div class="row"><button id="previous">← Previous</button><button id="next">Next →</button>
 <button id="unreviewed">Next unreviewed</button></div>
-<p class="shortcut">Shortcuts: <kbd>Enter</kbd> save spread · <kbd>0</kbd> no spread ·
+<p class="shortcut">Shortcuts: <kbd>Enter</kbd> save cash · <kbd>0</kbd> no cash ·
 <kbd>← →</kbd> browse · <kbd>Delete</kbd> clear boxes.
 Everything is saved locally. You can return and change any label.</p>
 <script nonce="__TOKEN__">
@@ -68,8 +72,8 @@ function progress(){
  const positive=records.filter(r=>r.status==='positive').length;
  const negative=records.filter(r=>r.status==='negative').length;
  const pending=records.filter(r=>r.status==='unreviewed').length;
- get('progress').textContent=`${reviewed} reviewed · ${positive} spreads · `+
-  `${negative} no spread · ${pending} still to review`;
+ get('progress').textContent=`${reviewed} reviewed · ${positive} with cash · `+
+  `${negative} no cash · ${pending} still to review`;
 }
 function render(){
  ctx.clearRect(0,0,canvas.width,canvas.height);
@@ -81,7 +85,7 @@ function render(){
    const [x1,y1,x2,y2]=box;ctx.strokeRect(x1,y1,x2-x1,y2-y1);
    ctx.font=`${Math.max(16,canvas.width/55)}px system-ui`;
    ctx.fillStyle='#152340';ctx.fillRect(x1,y1,100,25);
-   ctx.fillStyle='#ffffff';ctx.fillText(`Fan ${i+1}`,x1+6,y1+18);
+   ctx.fillStyle='#ffffff';ctx.fillText(`Cash ${i+1}`,x1+6,y1+18);
  });
 }
 function point(event){
@@ -100,7 +104,7 @@ canvas.addEventListener('pointermove',event=>{if(start){draft=rectangle(start,po
 canvas.addEventListener('pointerup',event=>{
  if(!start)return;const box=rectangle(start,point(event));start=null;draft=null;
   if(box[2]-box[0]>2&&box[3]-box[1]>2){
-   boxes.push(box);notice('Box drawn. Save spread to keep this label.');
+   boxes.push(box);notice('Box drawn. Save cash to keep this label.');
   }
  render();
 });
@@ -115,11 +119,22 @@ async function show(position){
  if(!records.length){photo=null;canvas.hidden=true;get('empty').hidden=false;controls(true);
  get('finish').disabled=false;progress();return;}
  index=Math.max(0,Math.min(records.length-1,position));const record=records[index];
- const version=++loadVersion;controls(true);photo=null;boxes=record.boxes.map(box=>[...box]);
+ const version=++loadVersion;controls(true);photo=null;
+ boxes=record.review_boxes.map(box=>[...box]);
  start=null;draft=null;render();notice('Loading picture…');
  get('counter').textContent=`Picture ${index+1} / ${records.length}`;
- get('status').textContent={positive:'Saved: spread',negative:'Saved: no spread',excluded:'Skipped',
+ get('status').textContent={positive:'Saved: cash',negative:'Saved: no cash',excluded:'Skipped',
  unreviewed:'Needs review'}[record.status];
+ const suggested=record.status==='unreviewed'&&record.suggestion;
+ get('suggestion').hidden=!suggested;
+ if(suggested){
+  get('status').textContent='Needs review · AI suggestions';
+  get('suggestion').textContent=boxes.length?
+   `AI proposed ${boxes.length} cash box${boxes.length===1?'':'es'}. Check for missed cash and `+
+    'adjust any incorrect boxes, then click Save cash to accept. These are not saved labels yet.':
+   'AI found no cash. Check the picture before choosing No cash, or draw boxes around any '+
+    'cash it missed. This picture still needs your review.';
+ }
  get('metadata').textContent=`Source: ${record.source||'Not supplied'} · Session: ${record.group}`;
  const image=new Image();
  image.onload=()=>{if(version!==loadVersion)return;photo=image;canvas.width=record.width;
@@ -132,7 +147,7 @@ async function show(position){
 async function save(status){
  if(busy)return;
   if(status==='positive'&&!boxes.length){
-   notice('First draw a box around the whole money fan.',true);return;
+   notice('First draw a tight box around each cash bundle or single bill.',true);return;
   }
  controls(true);
  try{
@@ -146,10 +161,10 @@ async function save(status){
 get('positive').onclick=()=>save('positive');get('negative').onclick=()=>save('negative');
 get('excluded').onclick=()=>save('excluded');
 get('undo').onclick=()=>{
- boxes.pop();render();notice('Changes are kept when you click Save spread.');
+ boxes.pop();render();notice('Changes are kept when you click Save cash.');
 };
 get('clear').onclick=()=>{
- boxes=[];render();notice('Boxes cleared. Draw again, or choose No spread.');
+ boxes=[];render();notice('Boxes cleared. Draw again, or choose No cash.');
 };
 get('previous').onclick=()=>show(index-1);get('next').onclick=()=>show(index+1);
 get('unreviewed').onclick=()=>{
@@ -174,6 +189,17 @@ document.addEventListener('keydown',event=>{
  await show(pending<0?0:pending);}
  catch(error){notice(error.message,true);get('finish').disabled=false;}})();
 </script></body></html>"""
+
+
+def _review_item(record: dict) -> dict:
+    """Offer editable AI boxes without treating a suggestion as a reviewed label."""
+    item = deepcopy(record)
+    suggestion = item.get("suggestion")
+    if item["status"] == "unreviewed" and suggestion is not None:
+        item["review_boxes"] = deepcopy(suggestion["boxes"])
+    else:
+        item["review_boxes"] = deepcopy(item["boxes"])
+    return item
 
 
 def _handler(dataset: Dataset, token: str) -> type[BaseHTTPRequestHandler]:
@@ -230,7 +256,7 @@ def _handler(dataset: Dataset, token: str) -> type[BaseHTTPRequestHandler]:
             elif path == "/api/items":
                 if self._trusted():
                     with lock:
-                        records = dataset.records()
+                        records = [_review_item(record) for record in dataset.records()]
                     self._json(HTTPStatus.OK, records)
             elif path.startswith("/api/image/"):
                 if not self._trusted(image=True):
@@ -270,7 +296,7 @@ def _handler(dataset: Dataset, token: str) -> type[BaseHTTPRequestHandler]:
                         record = dataset.review(
                             value["id"], status=value["status"], boxes=value["boxes"]
                         )
-                    self._json(HTTPStatus.OK, record)
+                    self._json(HTTPStatus.OK, _review_item(record))
                 elif path == "/api/stop":
                     self._json(HTTPStatus.OK, {"saved": True})
                     threading.Thread(target=self.server.shutdown, daemon=True).start()
@@ -292,7 +318,7 @@ def run_labeler(directory: Path, *, open_browser: bool = True, port: int = 0) ->
     server = ThreadingHTTPServer(("127.0.0.1", port), _handler(dataset, token))
     address = f"http://127.0.0.1:{server.server_address[1]}/"
     print(f"Labeler: {address}")
-    print("Draw a box around each whole money fan. Finish labeling to close the local server.")
+    print("Check AI suggestions or draw cash boxes. Finish labeling to close the local server.")
     if open_browser:
         webbrowser.open(address)
     try:
