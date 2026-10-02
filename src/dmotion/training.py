@@ -35,11 +35,14 @@ def train_model(
     dataset_directory: Path,
     *,
     epochs: int = 30,
+    patience: int = 10,
     image_size: int = 640,
     device: str = "auto",
 ) -> Path:
     if type(epochs) is not int or not 1 <= epochs <= 500:
         raise ValueError("Training epochs must be an integer between 1 and 500")
+    if type(patience) is not int or not 0 <= patience <= 500:
+        raise ValueError("Training patience must be an integer between 0 and 500")
     if type(image_size) is not int or image_size < 32 or image_size % 32:
         raise ValueError("Training image size must be a positive multiple of 32")
     if not isinstance(device, str) or not device.strip():
@@ -94,7 +97,7 @@ def train_model(
             batch=4,
             nbs=4,  # Avoid accumulating many epochs before an update on small datasets.
             workers=0,
-            patience=10,
+            patience=patience,
             pretrained=True,
             seed=42,
             project=str(project),
@@ -150,6 +153,7 @@ def train_model(
         "checkpoint": str(best),
         "dataset": str(data_path),
         "requested_epochs": epochs,
+        "patience": patience,
         "completed_epochs": int(model.trainer.epoch) + 1,
         **updates,
         "image_size": image_size,

@@ -90,3 +90,16 @@ def test_trained_mode_uses_custom_backend(monkeypatch):
     assert main(["run", "--mode", "trained"]) == 0
     assert received["config"].detector.backend == "trained"
     assert received["checking"] is False
+
+
+@pytest.mark.parametrize(("arguments", "expected"), [([], 10), (["--patience", "30"], 30)])
+def test_training_patience_reaches_training_function(monkeypatch, tmp_path, arguments, expected):
+    received = {}
+
+    def train(config, directory, **kwargs):
+        received.update(kwargs)
+        return tmp_path / "trained.pt"
+
+    monkeypatch.setitem(sys.modules, "dmotion.training", SimpleNamespace(train_model=train))
+    assert main(["train", "--dataset", str(tmp_path), *arguments]) == 0
+    assert received["patience"] == expected

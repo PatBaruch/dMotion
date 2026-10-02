@@ -92,6 +92,7 @@ def test_training_uses_reviewed_export_and_tests_best_model_before_saving(tmp_pa
     info = json.loads(destination.with_suffix(".json").read_text())
     assert info["test_metrics"] == {"metrics/mAP50(B)": 0.42}
     assert info["completed_epochs"] == 2
+    assert info["patience"] == 10
     assert info["optimizer_steps"] == info["positive_lr_optimizer_steps"] == 2
     assert info["device"] == "cpu"
     assert info["warnings"]
@@ -184,6 +185,24 @@ def test_counts_actual_optimizer_steps_instead_of_epochs(tmp_path, monkeypatch):
     assert info["completed_epochs"] == 10
     assert info["optimizer_steps"] == 3
     assert info["positive_lr_optimizer_steps"] == 1
+
+
+@pytest.mark.parametrize("patience", [0, 30])
+def test_explicit_patience_reaches_training_and_metadata(tmp_path, monkeypatch, patience):
+    dataset = small_dataset(tmp_path)
+    calls = fake_dependencies(monkeypatch)
+    destination = train_model(
+        AppConfig(root=tmp_path), dataset.directory, epochs=1, patience=patience
+    )
+    assert calls[1][1]["patience"] == patience
+    assert json.loads(destination.with_suffix(".json").read_text())["patience"] == patience
+
+
+@pytest.mark.parametrize("patience", [-1, 501, True, 1.5, "30"])
+def test_bad_patience_fails_before_dataset_creation_or_model_import(tmp_path, patience):
+    with pytest.raises(ValueError, match="patience must be an integer between 0 and 500"):
+        train_model(AppConfig(root=tmp_path), tmp_path / "dataset", patience=patience)
+    assert not (tmp_path / "dataset").exists()
 
 
 @pytest.mark.parametrize("optimizer_lrs", [[], [0.0], [float("nan")]])

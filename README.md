@@ -53,7 +53,7 @@ live detection can still miss, and it can trigger on unrelated objects.
 Hold cash clearly in view for two seconds, remove it, then show empty hands and
 cards to check for false alarms. Try a fan, stack, and single bill separately.
 Press T to test sound and
-S to save a missed example. This shortcut does not use the six-photo starter model.
+S to save a missed example. This shortcut uses the original text-prompt model.
 
 The overlay shows model warm-up, whether the model is running, and the number of
 processed frames. After warm-up, it distinguishes no objects, detected objects,
@@ -147,17 +147,24 @@ photos; they are excluded from training until you label them. Google examples ar
 a small starter set. Add your own euros, lighting, camera angles, and backgrounds
 to make the model useful on your laptop.
 
-The starter dataset on this laptop has six reviewed photos: three Google/Pinterest
-money spreads, your euro photo, and two photos without money. This is enough to
-check that the training pipeline runs. A model trained on this tiny set is an
-experiment; it still needs more varied examples and webcam testing.
+The dataset on this laptop contains the six original photos and 45 frames from
+three videos. All video frames have been visually reviewed: 37 have corrected
+cash boxes and eight were excluded for blur or uncertain boundaries. There are
+43 usable photos in total, including two without money. Original images and
+review decisions are preserved locally. This remains a small experiment that
+needs more varied examples and webcam testing.
 
 The training setup now updates weights every batch and records actual optimizer
 updates. It refuses to replace the model if there were no updates at a positive
-learning rate. The corrected starter run made 11 such updates, but still missed
-the euro photo at both `0.25` and `0.10` confidence. Use `make test-money` for the
-current cash experiment; collect more examples before expecting `make trained`
-to work reliably.
+learning rate. Each run records the exact photos, splits and learning updates.
+`make trained` loads the latest completed model; `make test-money` uses the
+original prompt detector.
+
+The video-based model was trained and checked on 3 October 2026. It detects the
+uploaded euro photo and cash in the separate fan-video examples, but still misses
+some held-out bed-video spreads and can draw extra boxes. Run `make trained` to
+test it with your webcam. See the [saved training results](docs/TRAINING_RUN_2026-10-03.md)
+for the exact dataset and checks.
 
 Record at least three separate sessions containing cash, plus sessions without
 cash. The workflow keeps each session together when splitting the data,

@@ -194,6 +194,12 @@ dataset, so a complete training run may take longer than an hour.
 .venv/bin/dmotion train --epochs 30 --image-size 640 --device cpu
 ```
 
+To give a small dataset more learning steps, you can run
+`.venv/bin/dmotion train --epochs 100 --patience 30`. `--patience` controls how
+many epochs without improved validation results are allowed before stopping;
+the default is 10, and 0 disables early stopping. The selected value is saved
+in the training report.
+
 The first training run may download pretrained weights. After the weights and
 images are available, labeling, training, and detection can run offline. The
 trained detector is saved as `models/money-spread.pt`.

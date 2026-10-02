@@ -93,6 +93,7 @@ def parser() -> argparse.ArgumentParser:
             command.add_argument("--limit", type=int, default=20)
         if name == "train":
             command.add_argument("--epochs", type=int, default=30)
+            command.add_argument("--patience", type=int, default=10)
             command.add_argument("--image-size", type=int, default=640)
             command.add_argument("--device", default="auto")
     return root
@@ -219,6 +220,7 @@ def main(argv: list[str] | None = None) -> int:
                     config,
                     directory,
                     epochs=args.epochs,
+                    patience=args.patience,
                     image_size=args.image_size,
                     device=args.device,
                 )
