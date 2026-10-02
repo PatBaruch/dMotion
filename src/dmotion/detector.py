@@ -17,6 +17,18 @@ class Detection:
     label: str
 
 
+def mirror_detections(detections: list[Detection], width: int) -> list[Detection]:
+    """Map original-image boxes onto a mirrored preview without mirroring model input."""
+    return [
+        Detection(
+            (width - item.box[2], item.box[1], width - item.box[0], item.box[3]),
+            item.confidence,
+            item.label,
+        )
+        for item in detections
+    ]
+
+
 def prepare_environment(root: Path) -> None:
     """Keep downloaded files and library settings in ignored project folders."""
     cache = root / ".cache"

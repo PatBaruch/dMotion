@@ -58,6 +58,22 @@ detector, manually test a real spread, empty hands, a single bill, cards/paper,
 and removal/reappearance. Keep different recording sessions separate if you later
 train a custom model.
 
+## Diagnostic testing
+
+Use `make diagnose`, `diagnose.command`, or `.venv/bin/dmotion run --mode check`
+to check real inference with common objects. Check mode changes prompts to person,
+cell phone, cup, bottle, and book, and sets confidence to `0.25`; it uses the same
+detector and camera path as default money mode. `image` and `prepare` also accept
+`--mode check` for tests without live camera input.
+
+The overlay exposes warm-up, model-running status, processed-frame count, and
+no-objects, objects, or too-slow results. A detected person verifies the pipeline,
+while unsuccessful money detection can still reflect the pretrained model's
+limitations. `T` checks sound and `S` saves a raw photo for repeatable testing.
+Demo mode uses a simulated box and does not verify model recognition. Automated
+checks do not establish camera hardware behavior or real-money accuracy; record
+those results separately when testing on the laptop.
+
 ## Next improvement
 
 If prompt-based detection is insufficient, label one box around each entire cash

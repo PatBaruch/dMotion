@@ -1,4 +1,4 @@
-.PHONY: setup prepare run demo doctor sound image check format
+.PHONY: setup prepare run diagnose demo doctor sound image check format
 
 setup:
 	sh scripts/setup.sh
@@ -8,6 +8,9 @@ prepare:
 
 run:
 	.venv/bin/dmotion run
+
+diagnose:
+	.venv/bin/dmotion run --mode check
 
 demo:
 	.venv/bin/dmotion run --demo

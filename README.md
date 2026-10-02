@@ -29,10 +29,25 @@ under **System Settings → Privacy & Security → Camera**. Restart that app if
 ## Test the basic experience
 
 ```sh
+make diagnose # Real model + common objects; stand in view to check detection.
 make demo    # Camera + manual box; no model needed. Press T to simulate.
 make sound   # Play the configured alert once.
 make doctor  # Check config, dependencies, and asset paths.
 ```
+
+You can also double-click `diagnose.command` in Finder, or run
+`.venv/bin/dmotion run --mode check`. Check mode uses the same pretrained detector
+with prompts for person, cell phone, cup, bottle, and book at confidence `0.25`.
+It draws boxes from real model results. Detecting you or one of these objects
+confirms that the camera-to-model pipeline works. If check mode works but money
+mode misses your cash, the money prompts or pretrained model are the likely issue.
+Money mode remains the default: use `make run` or `--mode money` to return to it.
+
+The overlay shows model warm-up, whether the model is running, and the number of
+processed frames. After warm-up, it distinguishes no objects, detected objects,
+and results that are too slow to display. A rising frame count with no objects
+means inference is running even when nothing matches the prompts. In demo mode,
+the manual box checks the display and sound only.
 
 In the camera window:
 
@@ -54,10 +69,14 @@ Put a photo in `data/`, then run:
 make image IMAGE="data/spread.jpg"
 # Optional preview and prompt overrides:
 .venv/bin/dmotion image data/spread.jpg --show --prompt "a fan of banknotes"
+# Check a photo containing a person, phone, cup, bottle, or book:
+.venv/bin/dmotion image data/person.jpg --mode check --show
 ```
 
 The annotated copy goes into `outputs/`. The command also prints detection labels,
 scores, coordinates, and inference time. It does not play the alert.
+You can verify model loading and inference without a camera using
+`.venv/bin/dmotion prepare --mode check`.
 
 ## Tune detection
 
@@ -117,9 +136,9 @@ and caches are excluded from version control.
 | --- | --- |
 | Cannot open camera | Check macOS permission, close other camera apps, try `--camera 1` |
 | First launch is slow | Run `make prepare`; initial downloads and warm-up take time |
-| No money detection | Use a clear close-up photo, test different prompts or lower confidence |
+| No money detection | Run `make diagnose` and stand in view; if it detects you, test a clear close-up money photo, different prompts, or lower confidence |
 | Single notes trigger | This model detects cash; add a custom spread dataset for that distinction |
-| Preview works but boxes never appear | Check inference time against the configured maximum result age |
+| Preview works but boxes never appear | Check model status and processed-frame count; if results are too slow, try a smaller `image_size` or increase the maximum result age |
 | MPS error | Run with `--device cpu` |
 | No audio | Run `make sound`, check volume/output device, verify your WAV file |
 | System Python is too old | Install Python 3.11–3.13 or set `DMOTION_PYTHON=/path/to/python` for setup |

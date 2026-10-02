@@ -9,7 +9,8 @@ from pathlib import Path
 
 from dmotion.audio import AlertSound
 from dmotion.config import AppConfig
-from dmotion.detector import Detection, MoneyDetector
+from dmotion.detector import Detection, MoneyDetector, mirror_detections
+from dmotion.monitor import InferenceMonitor
 from dmotion.trigger import DetectionTrigger
 
 logger = logging.getLogger(__name__)
@@ -75,7 +76,7 @@ def run_image(config: AppConfig, source: Path, output: Path | None, show: bool) 
     return 0
 
 
-def run_camera(config: AppConfig, *, demo: bool = False) -> int:
+def run_camera(config: AppConfig, *, demo: bool = False, checking: bool = False) -> int:
     import cv2
 
     detector = None if demo else MoneyDetector(config)
@@ -93,12 +94,12 @@ def run_camera(config: AppConfig, *, demo: bool = False) -> int:
         capture.set(cv2.CAP_PROP_FRAME_WIDTH, config.camera.width)
         capture.set(cv2.CAP_PROP_FRAME_HEIGHT, config.camera.height)
         sound = AlertSound(config)
-        trigger = DetectionTrigger(config.trigger)
+        monitor = InferenceMonitor(
+            config.camera.max_result_age_seconds, DetectionTrigger(config.trigger)
+        )
         future = None
         submitted_at = 0.0
-        result_at = float("-inf")
         detections: list[Detection] = []
-        inference_ms = 0.0
         demo_until = 0.0
         cv2.namedWindow(WINDOW, cv2.WINDOW_NORMAL)
         logger.info("Q / Esc: quit | M: mute | T: test alert | S: save raw test photo")
@@ -108,8 +109,6 @@ def run_camera(config: AppConfig, *, demo: bool = False) -> int:
             ok, frame = capture.read()
             if not ok:
                 raise RuntimeError("Camera stopped returning frames. Reconnect it and try again.")
-            if config.camera.mirror:
-                frame = cv2.flip(frame, 1)
             now = time.monotonic()
             if demo:
                 height, width = frame.shape[:2]
@@ -126,35 +125,57 @@ def run_camera(config: AppConfig, *, demo: bool = False) -> int:
                 )
             else:
                 if future is not None and future.done():
-                    new_detections = future.result()
-                    inference_ms = (now - submitted_at) * 1000
-                    fresh = now - submitted_at <= config.camera.max_result_age_seconds
-                    detections = new_detections if fresh else []
-                    result_at = submitted_at
-                    if trigger.update(bool(detections), now):
-                        sound.play()
-                        logger.info("Motion detected")
+                    try:
+                        new_detections = future.result()
+                    except Exception as exc:
+                        monitor.error = str(exc)
+                        logger.exception("Detection stopped; try restarting with --device cpu")
+                    else:
+                        if monitor.complete(new_detections, submitted_at, now):
+                            sound.play()
+                            logger.info("Object detected" if checking else "Motion detected")
+                        if monitor.last_result_stale:
+                            logger.warning(
+                                "Result discarded: %.0f ms exceeds the %.1fs age limit",
+                                monitor.inference_ms,
+                                config.camera.max_result_age_seconds,
+                            )
                     future = None
-                if now - result_at > config.camera.max_result_age_seconds:
-                    detections = []
-                    trigger.update(False, now)
-                if future is None:
+                detections = monitor.visible(now) if monitor.error is None else []
+                if future is None and monitor.error is None:
                     # One in-flight frame; inference cannot build a queue of old frames.
                     submitted_at = now
                     future = pool.submit(detector.predict, frame.copy())
 
-            display = draw_detections(frame.copy(), detections, solid=config.overlay.solid_box)
-            mode = (
-                "DEMO / T to simulate"
-                if demo
-                else ("MONEY DETECTED" if detections else "Looking for money")
+            display = cv2.flip(frame, 1) if config.camera.mirror else frame.copy()
+            display_detections = (
+                mirror_detections(detections, frame.shape[1])
+                if config.camera.mirror
+                else detections
             )
+            draw_detections(display, display_detections, solid=config.overlay.solid_box)
             audio_status = "ON" if sound.enabled and sound.sound is not None else "OFF"
-            for y, text in [
-                (28, mode),
-                (55, f"Audio: {audio_status} | {inference_ms:.0f} ms"),
-                (82, "Q quit | M mute | T test | S save photo"),
-            ]:
+            if demo:
+                lines = ["DEMO: simulated boxes, no AI | T to simulate"]
+            else:
+                lines = [
+                    "AI CHECK: person / phone / cup / bottle / book"
+                    if checking
+                    else "MONEY MODE | To test common objects: make diagnose",
+                    monitor.headline(now, checking=checking, confidence=config.detector.confidence),
+                    f"Frames analysed: {monitor.completed} | Objects now: {len(detections)}"
+                    f" | Last check: {monitor.inference_ms:.0f} ms | Device: {detector.device}",
+                ]
+                if monitor.error:
+                    lines.extend([monitor.error[:90], "Restart with CPU if this is a device error"])
+                elif monitor.last_result_stale:
+                    lines.append(
+                        "Try CPU or increase camera.max_result_age_seconds"
+                        f" | Discarded: {monitor.discarded}"
+                    )
+            lines.append(f"Audio: {audio_status} | Q quit | M mute | T test | S save photo")
+            for index, text in enumerate(lines):
+                y = 28 + index * 27
                 cv2.putText(
                     display, text, (12, y), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 0), 4, cv2.LINE_AA
                 )

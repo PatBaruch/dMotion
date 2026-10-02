@@ -9,7 +9,7 @@ from importlib import metadata, util
 from pathlib import Path
 
 from dmotion import __version__
-from dmotion.config import load_config, validate
+from dmotion.config import apply_mode, load_config, validate
 
 
 def parser() -> argparse.ArgumentParser:
@@ -26,6 +26,12 @@ def parser() -> argparse.ArgumentParser:
         command = commands.add_parser(name, help=help_text)
         command.add_argument("--config", type=Path, default=Path("config.toml"))
         if name in {"run", "image", "prepare"}:
+            command.add_argument(
+                "--mode",
+                choices=("money", "check"),
+                default="money",
+                help="check detects common objects to verify the model works",
+            )
             command.add_argument("--confidence", type=float)
             command.add_argument("--device")
             command.add_argument(
@@ -72,6 +78,10 @@ def main(argv: list[str] | None = None) -> int:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
     try:
         config = load_config(args.config)
+        if getattr(args, "mode", None):
+            config = apply_mode(config, args.mode)
+            if args.mode == "check":
+                logging.info("AI check mode: look for a person, phone, cup, bottle, or book")
         overrides = {}
         for name in ("confidence", "device"):
             if getattr(args, name, None) is not None:
@@ -114,7 +124,7 @@ def main(argv: list[str] | None = None) -> int:
 
         if args.command == "image":
             return run_image(config, args.source, args.output, args.show)
-        return run_camera(config, demo=args.demo)
+        return run_camera(config, demo=args.demo, checking=args.mode == "check")
     except KeyboardInterrupt:
         return 130
     except Exception as exc:

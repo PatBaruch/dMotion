@@ -2,7 +2,7 @@
 
 import math
 import tomllib
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 
@@ -54,6 +54,22 @@ class AppConfig:
 
     def resolve(self, path: str) -> Path:
         return (self.root / Path(path).expanduser()).resolve()
+
+
+CHECK_PROMPTS = ("person", "cell phone", "cup", "bottle", "book")
+
+
+def apply_mode(config: AppConfig, mode: str) -> AppConfig:
+    """Use familiar objects to check real inference, independently of cash recognition."""
+    if mode == "money":
+        return config
+    if mode == "check":
+        return replace(
+            config,
+            detector=replace(config.detector, prompts=CHECK_PROMPTS, confidence=0.25),
+            trigger=replace(config.trigger, consecutive_hits=1),
+        )
+    raise ValueError(f"Unknown detection mode: {mode}")
 
 
 def _number(value: object, name: str, minimum: float, maximum: float = math.inf) -> None:
