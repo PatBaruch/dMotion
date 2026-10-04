@@ -43,6 +43,11 @@ or `test`. Each split must contain cash and no-cash examples. Assign all related
 recordings to the same group before running; a split file cannot infer which
 separate videos were recorded during the same session.
 
+Changing backgrounds or clothes within one session does not create independent
+sessions. Keep all those recordings in one split. To train on every video from
+that session, reserve separate older sessions for validation and test, or record
+new independent sessions for evaluation.
+
 The chosen split map and immutable reviewed-data snapshot are retained in the
 run folder. Training uses only the training split; validation selects the best
 checkpoint. The command deliberately leaves test evaluation to a later comparison
