@@ -2,19 +2,18 @@
 
 ## Git
 
-This folder has its own repository. The initial prototype is committed on `main`.
-Create a short-lived branch for each change:
+The remote is [PatBaruch/dMotion](https://github.com/PatBaruch/dMotion).
+`main` holds released code; `develop` integrates completed features. New work uses
+`feature/<name>` from `origin/develop`, preferably in its own worktree. Releases
+use `release/<version>`; urgent release fixes use `hotfix/<name>`.
 
-```sh
-git switch -c codex/improve-detection
-make check
-git add src tests config.toml
-git commit -m "Improve detection confirmation"
-```
+Agents automatically update documentation, run checks, commit task files, push
+the branch, and create or update a pull request. The full process, one-time setup,
+and remaining review settings are in [Git workflow](GIT_WORKFLOW.md). No separate
+instruction to run tests or publish a completed feature is needed.
 
-Use focused commits that explain the change. Keep model binaries, photos, caches,
-and personal settings out of commits. The repository has no remote configured;
-hosting it on GitHub can be added later with your chosen repository and visibility.
+Keep model binaries, photos, caches, and personal settings out of commits. Existing
+changes belonging to other tasks must be preserved, not included in feature PRs.
 
 ## Dependencies
 

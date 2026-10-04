@@ -63,3 +63,11 @@ check:
 format:
 	.venv/bin/ruff check --fix .
 	.venv/bin/ruff format .
+
+.PHONY: setup-workflow finish-feature
+
+setup-workflow:
+	sh scripts/setup-workflow.sh
+
+finish-feature:
+	.venv/bin/python scripts/finish_feature.py $(ARGS)
