@@ -1,6 +1,7 @@
 """Checks for publication safety and meaningful PR requirements."""
 
 import importlib.util
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -172,21 +173,52 @@ def test_failed_checks_never_stage_commit_push_or_open_a_pr(tmp_path, monkeypatc
     )
 
 
-def test_pre_push_rejects_failed_checks_against_a_real_local_remote(tmp_path):
+@pytest.mark.parametrize("hook_environment", [False, True])
+def test_pre_push_rejects_failed_checks_against_a_real_local_remote(
+    tmp_path, monkeypatch, hook_environment
+):
     # This exercises Git's actual hook dispatch, without credentials or a network.
     import shutil
 
+    local_git_variables = set(
+        subprocess.check_output(["git", "rev-parse", "--local-env-vars"], text=True).splitlines()
+    )
+
+    def foreign_environment():
+        # Git exports repository-local variables to hooks; foreign repositories
+        # must not inherit them. Also remove numbered command-line config entries.
+        return {
+            key: value
+            for key, value in os.environ.items()
+            if key not in local_git_variables and not key.startswith("GIT_CONFIG_")
+        }
+
+    caller = tmp_path / "caller"
+    subprocess.run(
+        ["git", "init", str(caller)], check=True, capture_output=True, env=foreign_environment()
+    )
+    original_config = (caller / ".git/config").read_bytes()
+    if hook_environment:
+        monkeypatch.setenv("GIT_DIR", str(caller / ".git"))
+        monkeypatch.setenv("GIT_COMMON_DIR", str(caller / ".git"))
+        monkeypatch.setenv("GIT_WORK_TREE", str(caller))
+        monkeypatch.setenv("GIT_INDEX_FILE", str(caller / ".git/index"))
+    environment = foreign_environment()
     root = tmp_path / "repo"
     remote = tmp_path / "remote.git"
     root.mkdir()
 
     def git(*args, check=True):
-        return subprocess.run(["git", *args], cwd=root, check=check, capture_output=True, text=True)
+        return subprocess.run(
+            ["git", *args], cwd=root, check=check, capture_output=True, text=True, env=environment
+        )
 
     git("init", "-b", "feature/check-hook")
     git("config", "user.name", "Workflow test")
     git("config", "user.email", "test@example.invalid")
-    subprocess.run(["git", "init", "--bare", str(remote)], check=True, capture_output=True)
+    subprocess.run(
+        ["git", "init", "--bare", str(remote)], check=True, capture_output=True, env=environment
+    )
     git("remote", "add", "origin", str(remote))
     scripts = Path(__file__).resolve().parents[1]
     for name in [".githooks/pre-push", "scripts/pre_push.py", "scripts/setup-workflow.sh"]:
@@ -197,7 +229,13 @@ def test_pre_push_rejects_failed_checks_against_a_real_local_remote(tmp_path):
     (root / ".venv/bin/python").symlink_to(sys.executable)
     (root / ".gitignore").write_text(".venv/\n")
     (root / "Makefile").write_text("check:\n\t@exit 1\n")
-    subprocess.run(["sh", "scripts/setup-workflow.sh"], cwd=root, check=True, capture_output=True)
+    subprocess.run(
+        ["sh", "scripts/setup-workflow.sh"],
+        cwd=root,
+        check=True,
+        capture_output=True,
+        env=environment,
+    )
     git(
         "add",
         "Makefile",
@@ -216,3 +254,5 @@ def test_pre_push_rejects_failed_checks_against_a_real_local_remote(tmp_path):
     blocked = git("push", "origin", "HEAD:refs/heads/main", check=False)
     assert blocked.returncode != 0
     assert "pull requests only" in blocked.stderr
+
+    assert (caller / ".git/config").read_bytes() == original_config
