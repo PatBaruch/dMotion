@@ -107,3 +107,49 @@ def test_source_tampering_stops_before_creating_a_suggestion(tmp_path, monkeypat
     with pytest.raises(ValueError, match="changed since import"):
         auto_label(config, dataset.directory, output=tmp_path / "output")
     assert dataset.manifest_path.read_bytes() == before
+
+
+@pytest.mark.parametrize("variant", ["tiny", "base"])
+def test_grounding_variants_pair_model_id_with_immutable_revision(tmp_path, monkeypatch, variant):
+    import sys
+    from types import SimpleNamespace
+
+    from dmotion.autolabel import auto_label
+    from dmotion.config import AppConfig
+    from dmotion.dataset import Dataset
+    from dmotion.teachers import GROUNDING_MODELS
+
+    path = tmp_path / "frame.jpg"
+    path.write_bytes(b"image")
+    dataset = Dataset(tmp_path / "dataset")
+    dataset.add_image(path, group="recording", width=100, height=100)
+    parameters = {}
+
+    class Teacher:
+        device = "cpu"
+        model = SimpleNamespace(config=SimpleNamespace())
+
+        def __init__(self, root, **kwargs):
+            parameters.update(kwargs)
+            self.revision = kwargs["revision"]
+
+        def predict(self, frame):
+            return []
+
+    monkeypatch.setitem(
+        sys.modules, "dmotion.grounding", SimpleNamespace(GroundingMoneyDetector=Teacher)
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "cv2",
+        SimpleNamespace(imread=lambda path: SimpleNamespace(shape=(100, 100, 3))),
+    )
+    monkeypatch.setattr("dmotion.autolabel._contact_sheets", lambda *args: [])
+    report = auto_label(
+        AppConfig(root=tmp_path), dataset.directory, engine="grounding", grounding_model=variant
+    )
+    model, revision = GROUNDING_MODELS[variant]
+    assert parameters["model_id"] == model and parameters["revision"] == revision
+    assert len(revision) == 40
+    assert json.loads(report.read_text())["model_revision"] == revision
+    assert dataset.summary()["unreviewed"] == 1

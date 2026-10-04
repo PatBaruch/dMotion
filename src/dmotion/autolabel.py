@@ -131,7 +131,7 @@ def auto_label(
         from dmotion.grounding import GroundingMoneyDetector
         from dmotion.teachers import GROUNDING_MODELS
 
-        model = GROUNDING_MODELS[grounding_model]
+        model, model_revision = GROUNDING_MODELS[grounding_model]
         model_digest = None
         detector = GroundingMoneyDetector(
             config.root,
@@ -140,10 +140,13 @@ def auto_label(
             image_size=config.detector.image_size,
             device=config.detector.device,
             model_id=model,
+            revision=model_revision,
         )
     records = []
     logger.info("Suggesting cash boxes for %s pictures on %s", len(pending), detector.device)
-    revision = getattr(getattr(detector.model, "config", None), "_commit_hash", None)
+    revision = getattr(getattr(detector.model, "config", None), "_commit_hash", None) or getattr(
+        detector, "revision", None
+    )
     for index, record in enumerate(pending, start=1):
         source = dataset.image_path(record)
         if hashlib.sha256(source.read_bytes()).hexdigest() != record["sha256"]:

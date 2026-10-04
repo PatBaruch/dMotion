@@ -28,7 +28,12 @@ recording do not provide more independent test sessions.
 ## 2. Choose a labeling teacher and review its suggestions
 
 Grounding DINO Tiny is the existing default. Base is now selectable, with greater
-memory/download requirements; it is not guaranteed to improve cash labeling:
+memory/download requirements; it is not guaranteed to improve cash labeling.
+Both IDs are paired with immutable revisions in `dmotion.teachers`: Tiny
+`a2bb814dd30d776dcf7e30523b00659f4f141c71`, Base
+`12bdfa3120f3e7ec7b434d90674b3396eccf88eb`. The same pin is passed to the processor
+and model through the existing Grounding DINO adapter, and retained in reports:
+
 
 ```sh
 .venv/bin/dmotion auto-label --dataset data/experiment --engine grounding \

@@ -9,8 +9,8 @@ from dmotion.dataset import _validate_boxes
 from dmotion.detector import Detection, prepare_environment, select_device
 
 GROUNDING_MODELS = {
-    "tiny": "IDEA-Research/grounding-dino-tiny",
-    "base": "IDEA-Research/grounding-dino-base",
+    "tiny": ("IDEA-Research/grounding-dino-tiny", "a2bb814dd30d776dcf7e30523b00659f4f141c71"),
+    "base": ("IDEA-Research/grounding-dino-base", "12bdfa3120f3e7ec7b434d90674b3396eccf88eb"),
 }
 
 

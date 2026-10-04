@@ -114,7 +114,14 @@ Review the agent-assisted labels in the existing browser labeler:
 .venv/bin/dmotion label --dataset data/harness-training-20261004
 ```
 
-Core verification: `make check` passed with 212 tests, without optional vision
-packages or hardware. Real inference, training and saved-video replay ran separately.
+Initial core verification passed 212 tests. After integrating the updated develop
+checks and immutable teacher pins, `make check` passed 235 tests with 69.04% coverage
+and no medium/high Bandit findings, without optional vision packages or hardware.
+The locked dependency audit found no known vulnerabilities in 111 registry versions;
+the pinned Git CLIP source is explicitly outside that advisory audit's scope.
+The wheel/source archive built and the wheel installed in a fresh core-only environment.
+Both labeling adapters were also exercised on real positive/negative frames with
+the updated Transformers 5.10.4 environment and the pinned Tiny model; this was
+API compatibility verification, not an additional accuracy benchmark. Real inference, training and saved-video replay ran separately.
 Live webcam interaction and audio playback were not checked in this experiment.
 Recordings, labels, weights and generated outputs are excluded from the PR.
