@@ -17,8 +17,16 @@ def default_base(branch: str) -> str:
     raise ValueError("Use feature/<name>, release/<version>, or hotfix/<name>.")
 
 
-def validate_pull_request(base: str, head: str, title: str, body: str) -> list[str]:
+def validate_pull_request(
+    base: str, head: str, title: str, body: str, *, maintenance_bot: bool = False
+) -> list[str]:
     errors = []
+    # GitHub's verified bot supplies its own changelog body and branch naming.
+    # A branch named dependabot/... alone never grants this exception.
+    if maintenance_bot and head.startswith("dependabot/") and base in {"main", "develop"}:
+        if not title.strip() or len((body or "").strip()) < 12:
+            errors.append("Dependency updates need a title and explanatory body.")
+        return errors
     if base == "main":
         valid_route = head.startswith(("release/", "hotfix/"))
     elif base == "develop":
@@ -57,7 +65,14 @@ def main() -> int:
     args = parser.parse_args()
     event = json.loads(args.event.read_text())
     pr = event["pull_request"]
-    errors = validate_pull_request(pr["base"]["ref"], pr["head"]["ref"], pr["title"], pr["body"])
+    user = pr.get("user", {})
+    errors = validate_pull_request(
+        pr["base"]["ref"],
+        pr["head"]["ref"],
+        pr["title"],
+        pr["body"],
+        maintenance_bot=user.get("login") == "dependabot[bot]" and user.get("type") == "Bot",
+    )
     for error in errors:
         print(f"PR policy: {error}")
     if not errors:
