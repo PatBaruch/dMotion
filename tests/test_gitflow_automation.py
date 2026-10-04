@@ -252,6 +252,29 @@ def test_newer_explicit_clean_result_can_confirm_a_valid_formal_review():
     assert flow.review_verdict(SHA, [review()], [], [completion()], [{"sha": SHA}])[0]
 
 
+@pytest.mark.parametrize("body", ["Codex Review: running", "Codex Review: unknown result"])
+def test_same_second_incomplete_comment_cannot_be_ordered_before_formal_completion(body):
+    timestamp = review()["submitted_at"]
+    comment = completion(body=body, created_at=timestamp, updated_at=timestamp)
+    assert not flow.review_verdict(SHA, [review()], [], [comment], [{"sha": SHA}])[0]
+
+
+def test_earlier_failed_attempt_is_superseded_by_a_completed_formal_review():
+    comment = completion(
+        body="Codex Review: running",
+        created_at="2026-10-04T11:59:59Z",
+        updated_at="2026-10-04T11:59:59Z",
+    )
+    assert flow.review_verdict(SHA, [review()], [], [comment], [{"sha": SHA}])[0]
+
+
+def test_same_second_edited_comment_cannot_be_ordered_by_creation_id():
+    clean = completion()
+    edited = completion(id=1, body="Codex Review: running")
+    assert not flow.review_verdict(SHA, [], [], [clean, edited], [{"sha": SHA}])[0]
+    assert not flow.review_verdict(SHA, [review()], [], [clean, edited], [{"sha": SHA}])[0]
+
+
 @pytest.mark.parametrize("change", [{"head_sha": BASE}, {"app": {"id": 2}}])
 def test_ci_requires_exact_head_and_verified_actions_app(change):
     runs = checks()

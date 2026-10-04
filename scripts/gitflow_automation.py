@@ -107,10 +107,20 @@ def completion_comment_verdict(
     ]
     if not candidates:
         return False, f"No completed Codex review for current head {sha}"
-    comment = max(candidates, key=lambda item: (item.get("updated_at") or "", item["id"]))
-    body = comment.get("body") or ""
-    if not comment.get("created_at") or not comment.get("updated_at"):
+    if any(not item.get("created_at") or not item.get("updated_at") for item in candidates):
         return False, "Codex completion comment lacks submission evidence"
+    latest = max(item["updated_at"] for item in candidates)
+    tied = [item for item in candidates if item["updated_at"] == latest]
+    # IDs order creation, not edits. Validate every result tied within one second.
+    for comment in sorted(tied, key=lambda item: item["id"]):
+        ok, reason = validate_completion_comment(sha, comment, commits)
+        if not ok:
+            return False, reason
+    return ok, reason
+
+
+def validate_completion_comment(sha: str, comment: dict, commits: list[dict]) -> tuple[bool, str]:
+    body = comment.get("body") or ""
     if REVIEW_ERRORS.search(body) or re.search(r"\[P[01]\]", body):
         return False, "Codex reported an unsuccessful or blocking review"
     first_line = body.splitlines()[0] if body else ""
@@ -158,7 +168,7 @@ def review_verdict(
         comment
         for comment in comments or []
         if is_codex(comment)
-        and (comment.get("updated_at") or comment.get("created_at") or "") > review["submitted_at"]
+        and (comment.get("updated_at") or comment.get("created_at") or "") >= review["submitted_at"]
         and (
             (comment.get("body") or "").startswith("Codex Review:")
             or REVIEW_ERRORS.search(comment.get("body") or "")

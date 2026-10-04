@@ -134,6 +134,8 @@ observed `Codex Review: Didn't find any major issues.` result with an explicit
 uniquely identify the current head among the PR's commits; at least ten hexadecimal
 characters are required. The newest bot result must be complete and successful.
 Comments cannot override pending/dismissed/blocking formal reviews. Review and
+completion comments sharing a one-second timestamp are ordered conservatively:
+an incomplete comment in that same second blocks the formal result. Review and
 comment events refresh the gate; the scheduled loop also rechecks thread resolution.
 Missing, pending, dismissed, stale, unrecognized, quota-failed, or P0/P1-blocking
 results fail. Unresolved threads and outstanding requests for changes also block.
