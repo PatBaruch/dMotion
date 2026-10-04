@@ -3,7 +3,8 @@
     "strict": true,
     "checks": [
       {"context": "test", "app_id": 15368},
-      {"context": "pr-policy", "app_id": 15368}
+      {"context": "pr-policy", "app_id": 15368},
+      {"context": "ai-review", "app_id": 15368}
     ]
   },
   "enforce_admins": true,
