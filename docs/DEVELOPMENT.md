@@ -95,3 +95,18 @@ No publication license has been selected for this project. Ultralytics code and
 weights have their own terms; consult its [licensing page](https://www.ultralytics.com/license)
 when choosing how to distribute a future product. Other dependencies retain their
 respective licenses.
+
+## Training harness
+
+`dmotion.harness` freezes reviewed manifests, applies explicit group splits, trains
+through `train_model(candidate_directory=..., evaluate_test=False)`, calibrates on
+validation predictions and evaluates separate test groups. Candidates never
+replace the active camera weights. `score_predictions` uses one-to-one IoU matching
+and separately counts false alarm frames. `compare_label_drafts` compares stored
+teacher suggestions only after review, on identical frame IDs and hashes.
+
+`dmotion.teachers.ReferenceTeacher` is an optional YOLOE labeling adapter with an
+explicit hashed reference image; Grounding DINO Tiny/Base use the existing lazy
+Transformers adapter. Core tests fake optional dependencies and require no model
+downloads, webcam, GPU or audio. Real model/video experiments are separate evidence.
+Usage and reproducibility requirements are in `docs/TRAINING_HARNESS.md`.

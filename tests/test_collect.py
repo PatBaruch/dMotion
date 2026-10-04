@@ -4,12 +4,15 @@ import sys
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 from dmotion.collect import import_video, record_camera
 from dmotion.config import AppConfig, CameraConfig
 from dmotion.dataset import Dataset
 
 
-def test_video_frames_keep_one_group_and_need_review(tmp_path, monkeypatch):
+@pytest.mark.parametrize("session", [None, "paired-shoot"])
+def test_video_frames_keep_one_group_and_need_review(tmp_path, monkeypatch, session):
     video = tmp_path / "test-recording.mp4"
     video.write_bytes(b"one original video")
     frames = [SimpleNamespace(shape=(60, 100, 3), index=index) for index in range(3)]
@@ -41,12 +44,16 @@ def test_video_frames_keep_one_group_and_need_review(tmp_path, monkeypatch):
         SimpleNamespace(VideoCapture=Capture, CAP_PROP_FPS=5, imwrite=write),
     )
     directory = tmp_path / "dataset"
-    assert import_video(directory, video, interval=1) == 3
+    assert import_video(directory, video, interval=1, session=session) == 3
     records = Dataset(directory).records()
     assert len({record["group"] for record in records}) == 1
     assert all(record["status"] == "unreviewed" and record["boxes"] == [] for record in records)
     assert all(record["source"].startswith("Video: test-recording.mp4,") for record in records)
-    assert import_video(directory, video, interval=1) == 0
+    assert import_video(directory, video, interval=1, session=session) == 0
+    if session is not None:
+        assert records[0]["group"] == session
+    with pytest.raises(ValueError, match="already belongs"):
+        import_video(directory, video, interval=1, session="different-shoot")
 
 
 def test_camera_saves_raw_frames_and_unreviewed_hints_then_cleans_up(tmp_path, monkeypatch):

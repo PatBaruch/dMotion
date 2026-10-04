@@ -5,6 +5,11 @@ detector learns from reviewed examples of fans, stacks, and single bills. The
 internal class name remains `money_spread` for compatibility. The camera, white
 box, and sound stay the same; trained mode changes the model that recognizes cash.
 
+For a candidate-only experiment with paired positive/negative videos, selectable
+labeling teachers, locked recording splits and measured false alarms, use the
+[training harness](TRAINING_HARNESS.md). The legacy `train` command below still
+replaces the default detector after training.
+
 The pipeline is:
 
 **Collect photos → review boxes → split sessions → train → test new examples.**

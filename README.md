@@ -255,3 +255,6 @@ excluded from version control.
 | System Python is too old | Install Python 3.11–3.13 or set `DMOTION_PYTHON=/path/to/python` for setup |
 
 Model API reference: [Ultralytics YOLO-World](https://docs.ultralytics.com/models/yolo-world/).
+
+For paired-video training, selectable labeling teachers and candidate comparisons,
+see [Training harness](docs/TRAINING_HARNESS.md).

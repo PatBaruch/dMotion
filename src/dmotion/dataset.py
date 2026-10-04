@@ -13,6 +13,7 @@ import shutil
 import tempfile
 from collections import Counter
 from copy import deepcopy
+from datetime import UTC, datetime
 from functools import wraps
 from io import BytesIO
 from pathlib import Path
@@ -220,14 +221,19 @@ class Dataset:
         return deepcopy(record)
 
     @_serialized_mutation
-    def review(self, id: str, *, status: str, boxes: list[list[int]]) -> dict:
+    def review(
+        self, id: str, *, status: str, boxes: list[list[int]], reviewer: str = "user"
+    ) -> dict:
         records = self.records()
         for record in records:
             if record["id"] != id:
                 continue
             _validate_boxes(status, boxes, record["width"], record["height"])
             record["status"] = status
+            if not isinstance(reviewer, str) or not reviewer.strip():
+                raise ValueError("Reviewer must be a nonempty name")
             record["boxes"] = deepcopy(boxes)
+            record["review"] = {"reviewer": reviewer, "reviewed_at": datetime.now(UTC).isoformat()}
             _write_json(self.manifest_path, {"version": 1, "records": records})
             return deepcopy(record)
         raise ValueError(f"No dataset image with ID {id}")
@@ -300,10 +306,23 @@ def _split_groups(records: list[dict], seed: int) -> dict[str, str]:
     return mapping
 
 
-def export_dataset(dataset: Dataset, output: Path, seed: int = 42) -> Path:
+def export_dataset(
+    dataset: Dataset, output: Path, seed: int = 42, *, group_splits: dict[str, str] | None = None
+) -> Path:
     """Build labels only from reviewed records, splitting by complete sessions."""
     records = [r for r in dataset.records() if r["status"] in {"positive", "negative"}]
-    mapping = _split_groups(records, seed)
+    mapping = _split_groups(records, seed) if group_splits is None else dict(group_splits)
+    if group_splits is not None:
+        groups = {r["group"] for r in records}
+        if set(mapping) != groups or any(
+            split not in {"train", "val", "test"} for split in mapping.values()
+        ):
+            raise ValueError(
+                "Split plan must assign every reviewed group exactly once to train/val/test"
+            )
+        for split in ("train", "val", "test"):
+            if not any(r["status"] == "positive" and mapping[r["group"]] == split for r in records):
+                raise ValueError(f"Split {split} needs reviewed positive examples")
     output = Path(output).expanduser().resolve()
     if dataset.directory.is_relative_to(output) or output.is_relative_to(
         dataset.directory / "images"
@@ -362,6 +381,7 @@ def export_dataset(dataset: Dataset, output: Path, seed: int = 42) -> Path:
             {
                 "version": 1,
                 "seed": seed,
+                "group_splits": mapping,
                 "source": str(dataset.directory),
                 "class": "money_spread",
                 "summary": dataset.summary(),

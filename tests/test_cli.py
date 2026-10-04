@@ -117,3 +117,18 @@ def test_training_patience_reaches_training_function(monkeypatch, tmp_path, argu
     monkeypatch.setitem(sys.modules, "dmotion.training", SimpleNamespace(train_model=train))
     assert main(["train", "--dataset", str(tmp_path), *arguments]) == 0
     assert received["patience"] == expected
+
+
+def test_harness_commands_parse_explicit_session_split_plan_and_teacher_choices():
+    from dmotion.cli import parser
+
+    arguments = parser().parse_args(
+        ["harness-import", "positive.mov", "negative.mov", "--session", "same-shoot"]
+    )
+    assert arguments.session == "same-shoot" and arguments.interval == 3
+    arguments = parser().parse_args(["harness-train", "--splits", "splits.json"])
+    assert str(arguments.splits) == "splits.json" and arguments.min_precision == 0.8
+    arguments = parser().parse_args(
+        ["auto-label", "--engine", "grounding", "--grounding-model", "base"]
+    )
+    assert arguments.grounding_model == "base"

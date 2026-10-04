@@ -143,7 +143,9 @@ def record_camera(
     return added
 
 
-def import_video(directory: Path, video: Path, *, interval: float = 1) -> int:
+def import_video(
+    directory: Path, video: Path, *, interval: float = 1, session: str | None = None
+) -> int:
     """Sample a video, keeping every frame in one group to prevent split leakage."""
     _positive_number(interval, "interval")
     video = video.expanduser().resolve()
@@ -154,7 +156,9 @@ def import_video(directory: Path, video: Path, *, interval: float = 1) -> int:
     dataset = Dataset(directory)
     directory.mkdir(parents=True, exist_ok=True)
     before = len(dataset.records())
-    group = f"video-{_file_hash(video)[:16]}"
+    if session is not None and (not isinstance(session, str) or not session.strip()):
+        raise ValueError("Session must be a nonempty name")
+    group = session.strip() if session is not None else f"video-{_file_hash(video)[:16]}"
     capture = cv2.VideoCapture(str(video))
     try:
         if not capture.isOpened():
@@ -174,13 +178,18 @@ def import_video(directory: Path, video: Path, *, interval: float = 1) -> int:
                     if not cv2.imwrite(str(path), frame):
                         raise RuntimeError("Could not save a video frame")
                     height, width = frame.shape[:2]
-                    dataset.add_image(
+                    record = dataset.add_image(
                         path,
                         group=group,
                         source=f"Video: {video.name}, {frame_index / fps:.2f}s",
                         width=width,
                         height=height,
                     )
+                    if session is not None and record["group"] != group:
+                        raise ValueError(
+                            f"A frame already belongs to {record['group']}; use a fresh dataset "
+                            "or assign all related groups to the same split."
+                        )
                 frame_index += 1
     finally:
         capture.release()
