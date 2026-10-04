@@ -219,6 +219,12 @@ dependencies, in `uv.lock`. Commit both files when changing dependencies. See
 [development notes](docs/DEVELOPMENT.md) for the Git workflow and dependency updates.
 GitHub Actions runs the same core checks when the repository is hosted on GitHub.
 
+Implementation agents automatically document completed features, run checks,
+commit task files, push a `feature/<name>` branch, and create or update a PR into
+`develop`. You do not need to request those completion steps each time. See the
+[automatic Git workflow](docs/GIT_WORKFLOW.md) for the branch rules, local hooks,
+and one-time Codex review setting. Merging remains a separate decision.
+
 ```text
 src/dmotion/        App, configuration, detector, alert, trigger logic
 tests/             Core tests that do not need a camera or downloaded models

@@ -1,0 +1,8 @@
+#!/bin/sh
+set -eu
+cd "$(git rev-parse --show-toplevel)"
+if [ ! -x .venv/bin/python ]; then
+    echo "Push blocked: install the locked core dependencies first (see docs/GIT_WORKFLOW.md)." >&2
+    exit 1
+fi
+exec .venv/bin/python scripts/pre_push.py
