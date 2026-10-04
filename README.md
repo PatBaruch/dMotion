@@ -127,6 +127,10 @@ are discarded; increase `camera.max_result_age_seconds` if your device is slower
 
 ## Train it to recognize displayed cash
 
+For an explicitly selected YOLOE Small experiment, use the separate
+[`train-yoloe` workflow](docs/YOLOE_TRAINING.md). It combines reviewed datasets,
+freezes pretrained features, and saves a candidate without replacing the live model.
+
 To create labels from recorded videos with AI, see the
 [automatic video labeling workflow](docs/TRAINING.md#use-ai-to-suggest-boxes-from-videos).
 `make auto-label` proposes cash boxes for review; the labeler accepts money fans,

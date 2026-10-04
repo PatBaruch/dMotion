@@ -31,6 +31,7 @@ def parser() -> argparse.ArgumentParser:
         ("fetch", "Download a curated JSON list of image URLs"),
         ("build-dataset", "Export reviewed examples to grouped YOLO splits"),
         ("train", "Train a small money-spread model from reviewed examples"),
+        ("train-yoloe", "Fine-tune a separate YOLOE Small cash candidate"),
     ]:
         command = commands.add_parser(name, help=help_text)
         command.add_argument("--config", type=Path, default=Path("config.toml"))
@@ -91,11 +92,17 @@ def parser() -> argparse.ArgumentParser:
         if name == "fetch":
             command.add_argument("sources", type=Path)
             command.add_argument("--limit", type=int, default=20)
-        if name == "train":
+        if name in {"train", "train-yoloe"}:
             command.add_argument("--epochs", type=int, default=30)
             command.add_argument("--patience", type=int, default=10)
             command.add_argument("--image-size", type=int, default=640)
             command.add_argument("--device", default="auto")
+        if name == "train-yoloe":
+            command.set_defaults(patience=8)
+            command.add_argument("--dataset", type=Path, nargs="+", required=True)
+            command.add_argument("--output", type=Path)
+            command.add_argument("--pretrained", type=Path)
+            command.add_argument("--split-file", type=Path)
     return root
 
 
@@ -162,6 +169,28 @@ def main(argv: list[str] | None = None) -> int:
         if getattr(args, "mute", False):
             config = replace(config, audio=replace(config.audio, enabled=False))
         validate(config)
+        if args.command == "train-yoloe":
+            from dmotion.yoloe_training import train_yoloe
+
+            candidate = train_yoloe(
+                config,
+                [config.resolve(str(path)) for path in args.dataset],
+                output=config.resolve(str(args.output)) if args.output is not None else None,
+                pretrained=(
+                    config.resolve(str(args.pretrained)) if args.pretrained is not None else None
+                ),
+                split_file=(
+                    config.resolve(str(args.split_file)) if args.split_file is not None else None
+                ),
+                epochs=args.epochs,
+                patience=args.patience,
+                image_size=args.image_size,
+                device=args.device,
+            )
+            print(
+                f"Saved candidate {candidate}. Calibrate on validation before testing or promotion."
+            )
+            return 0
         if hasattr(args, "dataset"):
             from dmotion.dataset import Dataset, export_dataset
 

@@ -300,10 +300,31 @@ def _split_groups(records: list[dict], seed: int) -> dict[str, str]:
     return mapping
 
 
-def export_dataset(dataset: Dataset, output: Path, seed: int = 42) -> Path:
+def export_dataset(
+    dataset: Dataset,
+    output: Path,
+    seed: int = 42,
+    *,
+    class_name: str = "money_spread",
+    group_splits: dict[str, str] | None = None,
+) -> Path:
     """Build labels only from reviewed records, splitting by complete sessions."""
     records = [r for r in dataset.records() if r["status"] in {"positive", "negative"}]
     mapping = _split_groups(records, seed)
+    if class_name not in {"money_spread", "cash"}:
+        raise ValueError("The dataset class must be money_spread or cash")
+    if group_splits is not None:
+        if not isinstance(group_splits, dict) or set(group_splits) != set(mapping):
+            raise ValueError("Split assignments must name every reviewed group exactly once")
+        if any(
+            not isinstance(split, str) or split not in {"train", "val", "test"}
+            for split in group_splits.values()
+        ):
+            raise ValueError("Group splits must be train, val or test")
+        mapping = dict(group_splits)
+        for split in ("train", "val", "test"):
+            if not any(r["status"] == "positive" and mapping[r["group"]] == split for r in records):
+                raise ValueError(f"{split} needs reviewed cash from an independent group")
     output = Path(output).expanduser().resolve()
     if dataset.directory.is_relative_to(output) or output.is_relative_to(
         dataset.directory / "images"
@@ -363,7 +384,8 @@ def export_dataset(dataset: Dataset, output: Path, seed: int = 42) -> Path:
                 "version": 1,
                 "seed": seed,
                 "source": str(dataset.directory),
-                "class": "money_spread",
+                "class": class_name,
+                "group_splits": mapping,
                 "summary": dataset.summary(),
                 "splits": counts,
                 "warnings": warnings,
@@ -373,7 +395,7 @@ def export_dataset(dataset: Dataset, output: Path, seed: int = 42) -> Path:
         (staging / "dataset.yaml").write_text(
             f"path: {json.dumps(str(output))}\n"
             "train: images/train\nval: images/val\ntest: images/test\n"
-            "names:\n  0: money_spread\n",
+            f"names:\n  0: {class_name}\n",
             encoding="utf-8",
         )
         if output.exists():

@@ -54,11 +54,13 @@ def trained_config(tmp_path):
     )
 
 
+@pytest.mark.parametrize("names", [{0: "money_spread"}, {0: "cash"}])
 def test_trained_detector_loads_custom_yolo_without_overwriting_learned_class_names(
     tmp_path,
     monkeypatch,
+    names,
 ):
-    calls = install_fake_models(monkeypatch)
+    calls = install_fake_models(monkeypatch, names=names)
     config = trained_config(tmp_path)
     path = config.resolve(config.detector.model)
     path.parent.mkdir()
@@ -75,7 +77,7 @@ def test_trained_detector_rejects_other_detection_classes(tmp_path, monkeypatch,
     path = config.resolve(config.detector.model)
     path.parent.mkdir()
     path.write_bytes(b"model placeholder")
-    with pytest.raises(ValueError, match="money_spread class"):
+    with pytest.raises(ValueError, match="money_spread or cash class"):
         MoneyDetector(config)
     assert not any(call[0] == "to" for call in calls)
 

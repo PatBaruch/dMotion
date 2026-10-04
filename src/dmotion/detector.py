@@ -72,8 +72,10 @@ class MoneyDetector:
                     "No trained model yet. Review your photos and run make train."
                 )
             self.model = YOLO(str(model_path))
-            if set(self.model.names.values()) != {"money_spread"}:
-                raise ValueError("The trained model must contain only the money_spread class")
+            if set(self.model.names.values()) not in ({"money_spread"}, {"cash"}):
+                raise ValueError(
+                    "The trained model must contain only the money_spread or cash class"
+                )
             report = model_path.with_suffix(".json")
             if report.is_file():
                 try:
