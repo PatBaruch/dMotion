@@ -89,6 +89,8 @@ the prose fully explains the feature.
   bypasses are disabled. The solo-maintainer setup uses zero mandatory approving
   reviews: GitHub does not allow the PR author to approve their own PR. Add one
   required approval when an independent reviewer is available.
+  The exact remote configuration is stored in `.github/branch-protection.json`;
+  required checks accept results from the verified GitHub Actions app.
 - Codex PR review needs its separate account setting: connect `PatBaruch/dMotion`,
   enable repository code review, turn on automatic review for the desired PRs,
   and choose a trigger covering updates to the PR. Configure personal preferences
