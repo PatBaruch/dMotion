@@ -92,8 +92,10 @@ important demonstration evidence before expiry.
   available. The current solo-maintainer protections use zero required approvals
   because GitHub prevents authors from approving their own PRs.
 
-AI comments are advisory; their absence is not a passing review. This workflow
-does not silently merge or tag releases. The local completion behavior depends
+AI comments are advisory; their absence is not a passing review. Current agent
+instructions authorize merging only after CI/security and current-commit AI
+review gates pass. They do not authorize tagging or production deployment.
+The local completion behavior depends
 on an active agent following `AGENTS.md`; GitHub checks and configured reviews
 continue even after that chat stops. A stopped agent does not repair failures.
 

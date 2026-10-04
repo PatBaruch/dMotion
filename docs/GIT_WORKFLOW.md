@@ -107,11 +107,16 @@ and reruns completion. A stopped chat is not a background repair service; GitHub
 CI and configured reviews still run, but subsequent code fixes need an active
 agent. No recurring automation is installed by this workflow.
 
-Merging is manual unless the user authorizes it. The completion command does not
-enable auto-merge. AI review comments alone are not a required approval or a
-guaranteed blocking check. Before merging, inspect the review and the latest CI
-results. Optional GitHub auto-merge still needs explicit review gates if you want
-the review outcome to block a merge.
+The current `AGENTS.md` authorizes feature, release, and hotfix publication and
+gated merging without another reminder. Merge only when the required CI/security
+checks pass, AI review covers the current head commit, and blocking findings are
+resolved. Missing, pending, failed, or stale reviews block merging. Tagging and
+production deployment still require separate authorization.
+
+The completion command currently publishes the PR; it does not itself implement
+background monitoring or a required AI-review check. Until that check is deployed,
+the active agent must inspect the actual current-commit review before merging.
+Do not enable CI-only auto-merge and assume that review comments form a gate.
 
 ## Troubleshooting
 

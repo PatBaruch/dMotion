@@ -1,6 +1,13 @@
 # dMotion agent instructions
 
-Always use Context7 when I need library/API documentation, code generation, setup or configuration steps without me having to explicitly ask.
+Use Context7 when external library/API behavior is uncertain, when
+introducing or upgrading dependencies, or when setup requires current
+documentation. Match the project's pinned dependency versions.
+
+Skip Context7 for routine edits, ordinary Git operations, and questions
+answerable from repository files. Reuse documentation already retrieved
+for the same version and topic during the task. Keep queries focused
+on unresolved questions.
 
 Use codebase-memory-mcp first for architecture, symbol lookup, call tracing, and change-impact analysis. Ensure this repository is indexed, verify relevant source before editing, and use text search when graph coverage is missing.
 
@@ -31,13 +38,15 @@ An explicit user instruction to keep work local, pause, or skip publication wins
 - Never force-push, bypass push hooks or branch protections, or push directly to
   `main` or `develop`. Keep datasets, weights, outputs, credentials, and unrelated
   work out of commits. Check before staging; never use `git add .` or `git add -A`.
-- Feature publication stops at a tested, documented PR. Merging and tagging a
-  release need the user's instruction. For an authorized release/hotfix, use
-  `release/<version>`/`hotfix/<name>` into `main`, then return the changes to
-  `develop` through a separate PR. Do not leave the two branches inconsistent.
-
-See `docs/GIT_WORKFLOW.md` for commands and the difference between automatic
-completion, local hooks, GitHub checks, and the separate Codex review setting.
+- Automatically create, push, and update feature, release, and hotfix PRs
+  without asking again. Merge automatically only when required CI and
+  security checks pass, AI review covers the latest commit, and blocking
+  findings are resolved. Missing or pending review blocks merging.
+  Use PRs into protected develop/main branches and synchronize release
+  changes back into develop. Never bypass protections or force-push.
+  Tagging and production deployment require separate authorization.
+  See `docs/GIT_WORKFLOW.md` for commands and the difference between automatic
+  completion, local hooks, GitHub checks, and the separate Codex review setting.
 
 ## Code Review Rules
 

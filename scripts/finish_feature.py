@@ -152,7 +152,8 @@ def main() -> int:
         print(f"\nFeature pushed: {sha}\nPull request: {url}")
         print("CI and review are pending until GitHub reports their results.")
         print(f"Monitor CI: gh pr checks {url} --watch --interval 15 --fail-fast")
-        print("Do not merge automatically; address review findings and report remaining blockers.")
+        print("Merge only after required CI/security checks and latest-commit AI review pass.")
+        print("Missing, pending, stale, or blocking review results prevent merging.")
         return 0
     except (ValueError, OSError, subprocess.CalledProcessError) as error:
         print(f"finish-feature stopped: {error}")
