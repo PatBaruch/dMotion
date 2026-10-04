@@ -11,7 +11,7 @@ requires-python = ">=3.11,<3.14"
 dependencies = ["filelock>=3.19,<5"]
 
 [project.optional-dependencies]
-labeling = ["transformers>=4.57,<4.58"]
+labeling = ["transformers>=4.57,<5.11"]
 vision = [
   "ultralytics>=8.4,<9",
   "opencv-python>=4.10,<5",
