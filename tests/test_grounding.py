@@ -5,7 +5,11 @@ from types import SimpleNamespace
 import pytest
 
 from dmotion.detector import Detection
-from dmotion.grounding import DEFAULT_GROUNDING_MODEL, GroundingMoneyDetector
+from dmotion.grounding import (
+    DEFAULT_GROUNDING_MODEL,
+    DEFAULT_GROUNDING_REVISION,
+    GroundingMoneyDetector,
+)
 
 
 class FakeTensor:
@@ -99,7 +103,7 @@ def fake_dependencies(monkeypatch, *, boxes=(), scores=(), labels=()):
     return calls
 
 
-def test_predict_uses_rgb_original_dimensions_and_transformers_v4_api(tmp_path, monkeypatch):
+def test_predict_uses_rgb_original_dimensions_and_supported_api(tmp_path, monkeypatch):
     calls = fake_dependencies(
         monkeypatch,
         boxes=[[-2.1, 3.6, 130.2, 70.4]],
@@ -114,7 +118,8 @@ def test_predict_uses_rgb_original_dimensions_and_transformers_v4_api(tmp_path, 
         DEFAULT_GROUNDING_MODEL,
         {
             "cache_dir": str(tmp_path / ".cache/huggingface/hub"),
-            "use_fast": False,
+            "backend": "pil",
+            "revision": DEFAULT_GROUNDING_REVISION,
         },
     )
     assert calls[1] == (
@@ -123,6 +128,7 @@ def test_predict_uses_rgb_original_dimensions_and_transformers_v4_api(tmp_path, 
         {
             "cache_dir": str(tmp_path / ".cache/huggingface/hub"),
             "use_safetensors": True,
+            "revision": DEFAULT_GROUNDING_REVISION,
             "disable_custom_kernels": True,
         },
     )
@@ -154,6 +160,24 @@ def test_predict_ignores_low_scores_nonfinite_and_degenerate_boxes(tmp_path, mon
 def test_predict_with_no_detections(tmp_path, monkeypatch):
     fake_dependencies(monkeypatch)
     assert GroundingMoneyDetector(tmp_path).predict(FakeFrame()) == []
+
+
+@pytest.mark.parametrize("revision", ["main", "v1.0", "a2bb814", "z" * 40])
+def test_mutable_or_incomplete_model_revision_is_rejected(tmp_path, revision):
+    with pytest.raises(ValueError, match="40-character"):
+        GroundingMoneyDetector(tmp_path, revision=revision)
+
+
+def test_custom_model_requires_an_explicit_revision(tmp_path, monkeypatch):
+    with pytest.raises(ValueError, match="revision"):
+        GroundingMoneyDetector(tmp_path, model_id="example/custom-grounding")
+    calls = fake_dependencies(monkeypatch)
+    revision = "b" * 40
+    detector = GroundingMoneyDetector(
+        tmp_path, model_id="example/custom-grounding", revision=revision
+    )
+    assert detector.revision == revision
+    assert calls[0][2]["revision"] == calls[1][2]["revision"] == revision
 
 
 def test_low_box_threshold_cannot_return_blank_labels_that_abort_draft_saving(

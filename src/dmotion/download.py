@@ -7,12 +7,26 @@ import logging
 import tempfile
 from pathlib import Path
 from urllib.parse import urlparse
-from urllib.request import Request, urlopen
+from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 from dmotion.dataset import Dataset
 
 logger = logging.getLogger(__name__)
 MAX_BYTES = 15 * 1024 * 1024
+
+
+def validate_image_url(url: str) -> None:
+    parsed = urlparse(url)
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+        raise ValueError("Image URLs must start with http:// or https:// and include a host")
+
+
+class ImageRedirectHandler(HTTPRedirectHandler):
+    """Keep redirects within the same permitted network protocols."""
+
+    def redirect_request(self, request, response, code, message, headers, newurl):
+        validate_image_url(newurl)
+        return super().redirect_request(request, response, code, message, headers, newurl)
 
 
 def read_sources(path: Path, limit: int = 20) -> list[dict]:
@@ -24,8 +38,7 @@ def read_sources(path: Path, limit: int = 20) -> list[dict]:
     for entry in entries:
         if not isinstance(entry, dict) or not isinstance(entry.get("url"), str):
             raise ValueError("Each source must contain an image URL")
-        if urlparse(entry["url"]).scheme not in {"http", "https"}:
-            raise ValueError("Image URLs must start with http:// or https://")
+        validate_image_url(entry["url"])
         for field in ("source", "group"):
             if field in entry and not isinstance(entry[field], str):
                 raise ValueError(f"Source {field} must be text")
@@ -44,7 +57,7 @@ def fetch_images(directory: Path, sources: Path, *, limit: int = 20) -> dict:
                 request = Request(
                     entry["url"], headers={"User-Agent": "dMotion/0.1 dataset collector"}
                 )
-                with urlopen(request, timeout=20) as response:
+                with build_opener(ImageRedirectHandler()).open(request, timeout=20) as response:
                     payload = response.read(MAX_BYTES + 1)
                 if len(payload) > MAX_BYTES:
                     raise ValueError("Image exceeds the 15 MB download limit")

@@ -47,3 +47,13 @@ completion, local hooks, GitHub checks, and the separate Codex review setting.
   that mix sessions or claim model accuracy from core unit tests alone.
 - Core checks must work without webcam/audio hardware, model downloads, or the
   optional vision dependencies. Record real-camera and model checks separately.
+- Treat AI review findings as evidence to inspect, not proof that code is safe.
+  Never report an absent/pending review as passed. Do not weaken coverage,
+  security gates, or PR policy to make a change pass; document narrowly justified
+  exceptions and inspect changes to CI configuration explicitly.
+- Keep model IDs and immutable model revisions together. Changing the selected
+  model requires the user's choice; reproducibility pins for that same model do
+  not authorize a different architecture or model.
+
+See `docs/AI_RELIABILITY.md` for gate thresholds, retained evidence, and the
+separate requirements for model evaluation, hardware acceptance, and delivery.

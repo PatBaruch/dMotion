@@ -1,18 +1,20 @@
 """Optional text-guided Grounding DINO adapter for draft cash annotations."""
 
 import math
+import re
 from pathlib import Path
 
 from dmotion.detector import Detection, select_device
 
 DEFAULT_GROUNDING_MODEL = "IDEA-Research/grounding-dino-tiny"
+DEFAULT_GROUNDING_REVISION = "a2bb814dd30d776dcf7e30523b00659f4f141c71"
 DEFAULT_CASH_PROMPTS = ("banknotes", "dollar bills", "cash money")
 
 
 class GroundingMoneyDetector:
     """Predict cash boxes in original OpenCV-frame coordinates on CPU by default.
 
-    Requires Transformers 4.57.x, PyTorch and Pillow only when instantiated.
+    Requires Transformers 5.10.x, PyTorch and Pillow only when instantiated.
     The first initialization downloads model assets into the project cache.
     """
 
@@ -26,7 +28,12 @@ class GroundingMoneyDetector:
         image_size: int = 800,
         device: str = "cpu",
         model_id: str = DEFAULT_GROUNDING_MODEL,
+        revision: str | None = None,
     ):
+        if revision is None and model_id == DEFAULT_GROUNDING_MODEL:
+            revision = DEFAULT_GROUNDING_REVISION
+        if revision is None or not re.fullmatch(r"[a-fA-F0-9]{40}", revision):
+            raise ValueError("Grounding DINO requires a full 40-character model revision")
         if not 0 <= confidence <= 1 or not 0 <= text_threshold <= 1:
             raise ValueError("Grounding DINO thresholds must be between 0 and 1")
         if image_size <= 0:
@@ -40,11 +47,12 @@ class GroundingMoneyDetector:
         except ImportError as exc:
             raise RuntimeError(
                 "Grounding DINO needs the optional grounding dependencies "
-                "(transformers>=4.57,<4.58, torch and Pillow)."
+                "(transformers>=5.10,<5.11, torch and Pillow)."
             ) from exc
 
         self.device = select_device(device, torch)
         self.model_id = model_id
+        self.revision = revision
         self.confidence = confidence
         self.text_threshold = text_threshold
         self.prompts = tuple(prompt.strip().lower().rstrip(".") for prompt in prompts)
@@ -55,12 +63,14 @@ class GroundingMoneyDetector:
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         self.processor = AutoProcessor.from_pretrained(
             model_id,
+            revision=revision,
             cache_dir=str(self.cache_dir),
-            use_fast=False,
+            backend="pil",
         )
         # CPU inference uses the regular PyTorch implementation; no CUDA build is needed.
         self.model = AutoModelForZeroShotObjectDetection.from_pretrained(
             model_id,
+            revision=revision,
             cache_dir=str(self.cache_dir),
             use_safetensors=True,
             disable_custom_kernels=True,
@@ -85,7 +95,7 @@ class GroundingMoneyDetector:
         ).to(self.device)
         with self._torch.inference_mode():
             outputs = self.model(**inputs)
-        # Transformers 4.57 calls the box confidence option `threshold`.
+        # The supported Transformers API calls box confidence `threshold`.
         result = self.processor.post_process_grounded_object_detection(
             outputs,
             inputs.input_ids,

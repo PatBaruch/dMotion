@@ -1,5 +1,10 @@
 # dMotion
 
+[![Checks](https://github.com/PatBaruch/dMotion/actions/workflows/checks.yml/badge.svg?branch=main)](https://github.com/PatBaruch/dMotion/actions/workflows/checks.yml)
+
+AI-assisted changes use automated tests, security checks, package verification,
+and documented pull requests. See [the reliability evidence and limits](docs/AI_RELIABILITY.md).
+
 A local laptop experiment: show cash to the webcam, get a white box around the
 banknotes, and hear an alert. Fans, stacks, and single bills count as cash.
 Python, OpenCV, Ultralytics YOLO, and Pygame.
