@@ -87,7 +87,55 @@ class GitHub:
         raise ValueError("Review-thread pagination limit exceeded")
 
 
-def review_verdict(sha: str, reviews: list[dict], threads: list[dict]) -> tuple[bool, str]:
+def is_codex(item: dict) -> bool:
+    user = item.get("user") or {}
+    return user.get("login") == BOT_LOGIN and user.get("id") == BOT_ID and user.get("type") == "Bot"
+
+
+def completion_comment_verdict(
+    sha: str, comments: list[dict], commits: list[dict]
+) -> tuple[bool, str]:
+    """Recognize only the observed native no-findings result, never a reaction."""
+    candidates = [
+        item
+        for item in comments
+        if is_codex(item)
+        and (
+            (item.get("body") or "").startswith("Codex Review:")
+            or REVIEW_ERRORS.search(item.get("body") or "")
+        )
+    ]
+    if not candidates:
+        return False, f"No completed Codex review for current head {sha}"
+    comment = max(candidates, key=lambda item: (item.get("updated_at") or "", item["id"]))
+    body = comment.get("body") or ""
+    if not comment.get("created_at") or not comment.get("updated_at"):
+        return False, "Codex completion comment lacks submission evidence"
+    if REVIEW_ERRORS.search(body) or re.search(r"\[P[01]\]", body):
+        return False, "Codex reported an unsuccessful or blocking review"
+    first_line = body.splitlines()[0] if body else ""
+    if not re.fullmatch(r"Codex Review: Didn't find any major issues\.(?: Swish!)?", first_line):
+        return False, "Unrecognized Codex completion comment"
+    references = re.findall(r"^\*\*Reviewed commit:\*\* `([0-9a-f]{10,40})`$", body, re.MULTILINE)
+    if len(references) != 1:
+        return False, "Codex completion must identify exactly one reviewed commit"
+    reference = references[0]
+    if len(reference) == 40:
+        matches = {reference}
+    else:
+        matches = {item["sha"] for item in commits if item["sha"].startswith(reference)}
+    if matches != {sha}:
+        return False, "Codex reviewed commit is stale, absent, or ambiguous in this PR"
+    return True, f"Codex completion comment {comment['id']} covers {sha}; no unresolved blockers"
+
+
+def review_verdict(
+    sha: str,
+    reviews: list[dict],
+    threads: list[dict],
+    comments: list[dict] | None = None,
+    commits: list[dict] | None = None,
+) -> tuple[bool, str]:
     """A toggle, reaction, empty list, quota message, or stale review cannot pass."""
     decisive_by_author = {}
     for review in sorted(reviews, key=lambda item: item["id"]):
@@ -98,20 +146,22 @@ def review_verdict(sha: str, reviews: list[dict], threads: list[dict]) -> tuple[
         return False, "A reviewer requested changes"
     if any(not thread["isResolved"] for thread in threads):
         return False, "Unresolved review conversations remain"
-    matching = [
-        item
-        for item in reviews
-        if item["user"].get("login") == BOT_LOGIN
-        and item["user"].get("id") == BOT_ID
-        and item["user"].get("type") == "Bot"
-        and item.get("commit_id") == sha
-    ]
+    matching = [item for item in reviews if is_codex(item) and item.get("commit_id") == sha]
     if not matching:
-        return False, f"No completed Codex review for current head {sha}"
+        return completion_comment_verdict(sha, comments or [], commits or [])
     review = max(matching, key=lambda item: item["id"])
     if review["state"] not in {"APPROVED", "COMMENTED"} or not review.get("submitted_at"):
         return False, "Codex review is pending, dismissed, or blocking"
     body = review.get("body") or ""
+    # A later error/finding must revoke an earlier clean submitted result too.
+    for comment in comments or []:
+        comment_body = comment.get("body") or ""
+        if (
+            is_codex(comment)
+            and (comment.get("updated_at") or "") > review["submitted_at"]
+            and (REVIEW_ERRORS.search(comment_body) or re.search(r"\[P[01]\]", comment_body))
+        ):
+            return False, "A newer Codex result reports an error or blocking finding"
     if REVIEW_ERRORS.search(body):
         return False, "Codex reported an unsuccessful review"
     if re.search(r"\[P[01]\]", body):
@@ -141,7 +191,13 @@ def inspect_pr(github: GitHub, number: int) -> dict:
     pr = github.api(f"pulls/{number}")
     sha = pr["head"]["sha"]
     reviews = github.pages(f"pulls/{number}/reviews")
-    review_ok, review_reason = review_verdict(sha, reviews, github.threads(number))
+    comments = github.pages(f"issues/{number}/comments")
+    commits = github.pages(f"pulls/{number}/commits")
+    if len(commits) != pr.get("commits", len(commits)):
+        raise ValueError("Incomplete PR commit history; refusing ambiguous review evidence")
+    review_ok, review_reason = review_verdict(
+        sha, reviews, github.threads(number), comments, commits
+    )
     checks = github.pages(f"commits/{sha}/check-runs?filter=latest", "check_runs")
     ci_ok, ci_reason = ci_verdict(sha, checks)
     policy_errors = validate_pull_request(
@@ -232,7 +288,9 @@ def ensure_ci(github: GitHub, pr: dict) -> None:
     sha = pr["head"]["sha"]
     runs = github.pages(f"actions/runs?head_sha={sha}", "workflow_runs")
     if any(
-        run["name"] == "Checks" and run["status"] in {"queued", "in_progress", "completed"}
+        run["name"] == "Checks"
+        and run["status"] in {"queued", "in_progress", "completed"}
+        and run.get("conclusion") != "action_required"
         for run in runs
     ):
         return

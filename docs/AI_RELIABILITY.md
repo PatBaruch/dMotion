@@ -34,7 +34,7 @@ is bug-free, that the detector is accurate, or that an AI reviewer found every b
 | CodeQL | Python and GitHub Actions, extended security queries; scores at least 7.0 or error-level findings fail | SARIF and GitHub Security alerts |
 | Distribution | Locked build tools build a wheel and source archive; wheel installs into a fresh environment with hashed, locked core dependencies; CLI help/version work outside the source tree | Distribution files and SHA-256 checksums |
 | PR policy | Gitflow destination, useful title, and four completed documentation sections | `pr-policy` result |
-| AI review | Authenticated Codex bot, submitted review of the latest commit; absent, failed, stale, blocking reviews and unresolved threads fail | `ai-review`, native review ID and commit SHA |
+| AI review | Authenticated Codex bot, submitted review or recognized clean completion comment bound to the latest commit; shortened SHAs must be unambiguous in the PR; absent, failed, stale, blocking results and unresolved threads fail | `ai-review`, native review/comment ID and commit SHA |
 
 The coverage floor reflects a measured baseline, not a target for finished
 production software. Camera/UI paths are currently poorly covered and remain

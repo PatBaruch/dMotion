@@ -85,6 +85,8 @@ def inspection_client(**changes):
         {
             ("GET", "pulls/7"): pull,
             ("GET", "pulls/7/reviews"): [review()],
+            ("GET", "issues/7/comments"): [],
+            ("GET", "pulls/7/commits"): [{"sha": SHA}],
             ("GET", f"commits/{SHA}/check-runs?filter=latest"): checks(),
             ("PUT", "pulls/7/merge"): {"merged": True, "sha": "c" * 40},
         }
@@ -140,6 +142,94 @@ def test_a_comment_does_not_withdraw_a_request_for_changes():
         review(id=14, user={"id": 3}, state="COMMENTED"),
     ]
     assert not flow.review_verdict(SHA, reviews, [])[0]
+
+
+def completion(**changes):
+    # The native bot's actual clean-result format observed on dMotion PR #9.
+    return {
+        "id": 5984578402,
+        "user": {"id": flow.BOT_ID, "login": flow.BOT_LOGIN, "type": "Bot"},
+        "created_at": "2026-10-04T21:28:27Z",
+        "updated_at": "2026-10-04T21:28:27Z",
+        "body": f"Codex Review: Didn't find any major issues. Swish!\n\n"
+        f"**Reviewed commit:** `{SHA[:10]}`\n\n<details>About Codex</details>",
+        **changes,
+    }
+
+
+def test_native_clean_comment_binds_unambiguous_pr_commit_and_reaches_merge_gate():
+    commits = [{"sha": SHA}, {"sha": BASE}]
+    assert flow.review_verdict(SHA, [], [], [completion()], commits)[0]
+    client = inspection_client()
+    client.routes["GET", "pulls/7/reviews"] = []
+    client.routes["GET", "issues/7/comments"] = [completion()]
+    assert flow.inspect_pr(client, 7)["review_ok"]
+    assert flow.merge_pr(client, 7)["merged"]
+
+
+def test_incomplete_commit_history_blocks_inspection_before_merge():
+    client = inspection_client(commits=2)
+    with pytest.raises(ValueError, match="Incomplete PR commit history"):
+        flow.merge_pr(client, 7)
+    assert not any(method == "PUT" for _, method, _ in client.calls)
+
+
+@pytest.mark.parametrize(
+    "comment,commits",
+    [
+        (completion(user={"id": 1, "login": flow.BOT_LOGIN, "type": "Bot"}), [{"sha": SHA}]),
+        (completion(user={"id": flow.BOT_ID, "login": "other", "type": "Bot"}), [{"sha": SHA}]),
+        (
+            completion(user={"id": flow.BOT_ID, "login": flow.BOT_LOGIN, "type": "User"}),
+            [{"sha": SHA}],
+        ),
+        (completion(created_at=None), [{"sha": SHA}]),
+        (completion(updated_at=None), [{"sha": SHA}]),
+        (completion(body="Codex Review: running"), [{"sha": SHA}]),
+        (completion(body="👍"), [{"sha": SHA}]),
+        (
+            completion(body="To use Codex here, create a Codex account and connect to github"),
+            [{"sha": SHA}],
+        ),
+        (completion(body=completion()["body"] + "\n[P1] Fix this"), [{"sha": SHA}]),
+        (completion(body=completion()["body"] + "\nReview was not completed"), [{"sha": SHA}]),
+        (
+            completion(body=completion()["body"].replace(SHA[:10], BASE[:10])),
+            [{"sha": BASE}, {"sha": SHA}],
+        ),
+        (completion(body=completion()["body"].replace(SHA[:10], SHA[:7])), [{"sha": SHA}]),
+        (completion(body=completion()["body"] + f"\n**Reviewed commit:** `{SHA}`"), [{"sha": SHA}]),
+        (completion(), []),
+        (completion(), [{"sha": BASE}]),
+        (completion(), [{"sha": SHA}, {"sha": SHA[:10] + "c" * 30}]),
+    ],
+)
+def test_invalid_or_ambiguous_completion_comments_cannot_pass(comment, commits):
+    assert not flow.review_verdict(SHA, [], [], [comment], commits)[0]
+
+
+def test_exact_comment_sha_and_latest_bot_result_revocation():
+    full = completion(body=completion()["body"].replace(SHA[:10], SHA))
+    assert flow.review_verdict(SHA, [], [], [full])[0]
+    error = completion(
+        id=5984578403,
+        updated_at="2026-10-04T21:30:00Z",
+        body="Codex Review: quota exhausted, cannot complete review",
+    )
+    assert not flow.review_verdict(SHA, [], [], [full, error])[0]
+    # Editing an older result must also invalidate its former completion.
+    edited = completion(id=1, updated_at="2026-10-04T21:31:00Z", body="Codex Review: running")
+    assert not flow.review_verdict(SHA, [], [], [full, edited])[0]
+    assert not flow.review_verdict(SHA, [review()], [], [error])[0]
+
+
+def test_clean_comment_cannot_override_formal_blockers_or_unresolved_threads():
+    comments, commits = [completion()], [{"sha": SHA}]
+    for state in ["PENDING", "DISMISSED", "CHANGES_REQUESTED"]:
+        assert not flow.review_verdict(SHA, [review(state=state)], [], comments, commits)[0]
+    assert not flow.review_verdict(SHA, [], [{"isResolved": False}], comments, commits)[0]
+    human = review(user={"id": 3}, state="CHANGES_REQUESTED")
+    assert not flow.review_verdict(SHA, [human], [], comments, commits)[0]
 
 
 @pytest.mark.parametrize("change", [{"head_sha": BASE}, {"app": {"id": 2}}])
@@ -237,6 +327,24 @@ def test_token_created_pr_gets_explicit_ci_dispatch_without_repeated_runs():
         client.calls.clear()
         flow.ensure_ci(client, pr())
         assert len(client.calls) == 1
+
+
+def test_approval_required_run_does_not_suppress_expected_sha_dispatch():
+    path = f"actions/runs?head_sha={SHA}"
+    client = FakeGitHub(
+        {
+            ("GET", path): [
+                {"name": "Checks", "status": "completed", "conclusion": "action_required"}
+            ],
+            ("POST", "actions/workflows/checks.yml/dispatches"): None,
+        }
+    )
+    flow.ensure_ci(client, pr())
+    assert client.calls[-1][2]["inputs"]["expected_sha"] == SHA
+    client.routes["GET", path].append({"name": "Checks", "status": "queued"})
+    client.calls.clear()
+    flow.ensure_ci(client, pr())
+    assert len(client.calls) == 1
 
 
 def test_new_base_is_merged_into_task_without_force_push():

@@ -125,9 +125,16 @@ privileged job checks out only `main` and runs `scripts/gitflow_automation.py`.
 It never executes PR code or downloaded artifacts. PR strings are JSON data,
 never shell commands. External Actions use pinned SHAs.
 
-The workflow publishes `ai-review` on the exact head. It requires a submitted
+The workflow publishes `ai-review` on the exact head. It accepts a submitted
 `APPROVED` or recognized `COMMENTED` review from the authenticated Codex connector
 bot, matching its login, immutable user ID, type, and the current `commit_id`.
+Codex can instead post a clean completion as a PR conversation comment. Only the
+observed `Codex Review: Didn't find any major issues.` result with an explicit
+`Reviewed commit` is accepted from that same verified bot. A shortened SHA must
+uniquely identify the current head among the PR's commits; at least ten hexadecimal
+characters are required. The newest bot result must be complete and successful.
+Comments cannot override pending/dismissed/blocking formal reviews. Review and
+comment events refresh the gate; the scheduled loop also rechecks thread resolution.
 Missing, pending, dismissed, stale, unrecognized, quota-failed, or P0/P1-blocking
 results fail. Unresolved threads and outstanding requests for changes also block.
 A toggle, reaction, or connection-error comment cannot pass.
@@ -146,7 +153,8 @@ ancestry, safe partial creation is resumable, and unexpected branch collisions
 fail. One managed promotion/sync PR prevents duplicates. These PRs need the same
 checks and current-head review; no tag or deployment is created.
 
-Token-created PRs can produce approval-required workflow runs. The loop explicitly
+Token-created PRs can produce approval-required workflow runs. Such runs do not
+count as executed checks or prevent the explicit dispatch. The loop explicitly
 dispatches `Checks` on the managed branch with an expected SHA; it rejects a branch
 that advanced before dispatch. Trusted policy checks are published on that head
 too. Native `allow_auto_merge` stays disabled: the loop performs freshly gated
