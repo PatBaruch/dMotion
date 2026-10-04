@@ -14,8 +14,10 @@ ACTIONS_APP = 15368
 CHECK = "ai-review"
 REQUIRED_CI = ("test", "pr-policy")
 REVIEW_ERRORS = re.compile(
-    r"(?:unable|failed|could not|couldn't|cannot) to review|"
-    r"quota.{0,40}(?:limit|exhaust)|(?:rate|usage)[ -]?limit|review.{0,30}unavailable",
+    r"(?:unable|failed|could not|couldn't|cannot)(?: to)? (?:complete (?:the )?)?review|"
+    r"quota.{0,40}(?:limit|exhaust)|(?:rate|usage)[ -]?limit|review.{0,30}unavailable|"
+    r"(?:something went wrong|review (?:was )?not (?:completed|performed)|"
+    r"connect (?:your account|to github)|create a codex account)",
     re.IGNORECASE,
 )
 
@@ -87,10 +89,12 @@ class GitHub:
 
 def review_verdict(sha: str, reviews: list[dict], threads: list[dict]) -> tuple[bool, str]:
     """A toggle, reaction, empty list, quota message, or stale review cannot pass."""
-    latest_by_author = {}
+    decisive_by_author = {}
     for review in sorted(reviews, key=lambda item: item["id"]):
-        latest_by_author[review["user"]["id"]] = review
-    if any(item["state"] == "CHANGES_REQUESTED" for item in latest_by_author.values()):
+        # A later comment cannot withdraw an outstanding request for changes.
+        if review["state"] in {"APPROVED", "CHANGES_REQUESTED", "DISMISSED"}:
+            decisive_by_author[review["user"]["id"]] = review
+    if any(item["state"] == "CHANGES_REQUESTED" for item in decisive_by_author.values()):
         return False, "A reviewer requested changes"
     if any(not thread["isResolved"] for thread in threads):
         return False, "Unresolved review conversations remain"

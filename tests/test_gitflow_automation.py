@@ -109,6 +109,9 @@ def test_only_completed_authenticated_current_review_passes():
         ([review(user={"id": flow.BOT_ID, "login": flow.BOT_LOGIN, "type": "User"})], []),
         ([review(body="Codex Review: quota exhausted, cannot complete review")], []),
         ([review(body="Codex Review: usage limit reached")], []),
+        ([review(body="Codex Review: couldn't review due to a service error")], []),
+        ([review(body="Codex Review: something went wrong")], []),
+        ([review(body="Codex Review: review was not performed")], []),
         ([review(body="Codex Review: [P1] Security issue")], []),
         ([review(body="To use Codex here, connect to GitHub")], []),
         ([review(body="")], []),
@@ -128,6 +131,15 @@ def test_resolved_threads_and_superseded_human_requests_allow_review():
         review(id=14, user={"id": 3}, state="APPROVED"),
     ]
     assert flow.review_verdict(SHA, reviews, [{"isResolved": True}])[0]
+
+
+def test_a_comment_does_not_withdraw_a_request_for_changes():
+    reviews = [
+        review(),
+        review(id=13, user={"id": 3}, state="CHANGES_REQUESTED"),
+        review(id=14, user={"id": 3}, state="COMMENTED"),
+    ]
+    assert not flow.review_verdict(SHA, reviews, [])[0]
 
 
 @pytest.mark.parametrize("change", [{"head_sha": BASE}, {"app": {"id": 2}}])
