@@ -66,6 +66,9 @@ Only select files belonging to that task. The command refuses directories and
 unselected changes, verifies the branch is based on the current destination,
 runs `git diff --check` and `make check`, stages the selected files, and commits
 them. It pushes without force and creates or updates the branch's existing PR.
+It adds `gitflow:auto`, opting in only this task's PR. Initial setup must create
+that repository label; if absent, completion stops after publication and can be
+rerun after repairing the label.
 Rerunning after a partial failure preserves the commit and reuses an open PR.
 `make finish-feature ARGS='...'` exposes the same command.
 
@@ -89,7 +92,8 @@ the prose fully explains the feature.
   Editing the description reruns this check. Its source is the trusted default
   branch, so changes to that policy require promotion to `main` to take effect.
   Verified Dependabot PRs use their own generated documentation.
-- Protected branches require both checks, an up-to-date branch, resolved review
+- Protected branches require `test`, `pr-policy`, and `ai-review`, an up-to-date
+  branch, resolved review
   conversations, and PR-based changes. Force pushes/deletions and administrator
   bypasses are disabled. The solo-maintainer setup uses zero mandatory approving
   reviews: GitHub does not allow the PR author to approve their own PR. Add one
@@ -104,14 +108,85 @@ the prose fully explains the feature.
 
 While active, the agent watches CI, reads review results, fixes actionable issues,
 and reruns completion. A stopped chat is not a background repair service; GitHub
-CI and configured reviews still run, but subsequent code fixes need an active
-agent. No recurring automation is installed by this workflow.
+CI, reviews, and the deployed Gitflow loop still run, but code fixes need an active
+agent. Repository PR comments and review triggers needed for the task are authorized.
 
-Merging is manual unless the user authorizes it. The completion command does not
-enable auto-merge. AI review comments alone are not a required approval or a
-guaranteed blocking check. Before merging, inspect the review and the latest CI
-results. Optional GitHub auto-merge still needs explicit review gates if you want
-the review outcome to block a merge.
+The current `AGENTS.md` authorizes feature, release, and hotfix publication and
+gated merging without another reminder. Merge only when the required CI/security
+checks pass, AI review covers the current head commit, and blocking findings are
+resolved. Missing, pending, failed, or stale reviews block merging. Tagging and
+production deployment still require separate authorization.
+
+## Trusted merge and promotion loop
+
+`.github/workflows/gitflow-automation.yml` runs after CI, relevant trusted PR
+events, protected-branch changes, manual dispatch, and every ten minutes. Its
+privileged job checks out only `main` and runs `scripts/gitflow_automation.py`.
+It never executes PR code or downloaded artifacts. PR strings are JSON data,
+never shell commands. External Actions use pinned SHAs.
+
+The workflow publishes `ai-review` on the exact head. It requires a submitted
+`APPROVED` or recognized `COMMENTED` review from the authenticated Codex connector
+bot, matching its login, immutable user ID, type, and the current `commit_id`.
+Missing, pending, dismissed, stale, unrecognized, quota-failed, or P0/P1-blocking
+results fail. Unresolved threads and outstanding requests for changes also block.
+A toggle, reaction, or connection-error comment cannot pass.
+
+Only `gitflow:auto` PRs from this repository are updated or merged. Unlabeled
+PRs are left alone apart from reporting policy/review checks. A newer protected
+base is merged into a managed task branch without rewriting history; that new
+head needs fresh checks and review. The loop rereads current evidence immediately
+before merging, supplies an atomic head-SHA guard, and relies on GitHub's branch
+protections too. Conflicts, unavailable evidence, and racing commits block merging.
+
+It creates `release/automation-<develop SHA>` into `main` for code differences.
+Main commits missing from develop take priority: `hotfix/sync-<main SHA>` returns
+them through a PR into `develop`. Captured immutable source/base commits preserve
+ancestry, safe partial creation is resumable, and unexpected branch collisions
+fail. One managed promotion/sync PR prevents duplicates. These PRs need the same
+checks and current-head review; no tag or deployment is created.
+
+Token-created PRs can produce approval-required workflow runs. The loop explicitly
+dispatches `Checks` on the managed branch with an expected SHA; it rejects a branch
+that advanced before dispatch. Trusted policy checks are published on that head
+too. Native `allow_auto_merge` stays disabled: the loop performs freshly gated
+merges rather than placing a PR in a CI-only queue. Actions approvals never count
+as AI review. Background automation cannot implement code fixes while the agent
+is stopped.
+
+## Initial rollout and prerequisites
+
+Default-branch workflows must reach `main` before background behavior is active.
+Bootstrap through reviewed feature and release PRs. The active agent can inspect
+or merge one PR with the same real-evidence gates:
+
+```sh
+.venv/bin/python scripts/gitflow_automation.py --repo PatBaruch/dMotion --pr 7
+.venv/bin/python scripts/gitflow_automation.py --repo PatBaruch/dMotion --pr 7 --merge
+```
+
+The merge command cannot invent a passing check or bypass a protection. Once
+main's trusted workflow publishes the gate, add `ai-review` to both protected
+branches using `.github/branch-protection.json`, preserving stricter existing
+settings. Never remove an existing required check to complete rollout.
+
+GitHub Actions must be permitted to create promotion PRs. GitHub bundles this as
+**Allow GitHub Actions to create and approve pull requests**; enabling it also
+grants approval capability, although this workflow never submits reviews and
+accepts only the independent Codex connector. Default token permissions remain
+read-only. Changing this broader setting needs maintainer approval. If disabled,
+promotion creation is blocked and reported; no local token is copied into secrets.
+
+Enable Dependabot security updates separately. Weekly Dependabot configuration
+and scheduled scans become active on main. Codex needs both the saved automatic
+review setting covering updates and an account GitHub connection authorized for
+dMotion. If `@codex review` asks to connect an account, repair the connection at
+<https://chatgpt.com/codex/cloud/settings/connectors>, then retry review.
+
+After rollout, dispatch **Gitflow automation** and **Checks** for immediate
+verification and retain exact-head reports. A manual dispatch demonstrates
+execution; the first actual scheduled run remains separate evidence. Repository
+configuration is never a substitute for those actual results.
 
 ## Troubleshooting
 
