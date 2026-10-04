@@ -115,7 +115,7 @@ Review the agent-assisted labels in the existing browser labeler:
 ```
 
 Initial core verification passed 212 tests. After integrating the updated develop
-checks and immutable teacher pins, `make check` passed 235 tests with 69.04% coverage
+checks and immutable teacher pins, `make check` passed 236 tests with 69.04% coverage
 and no medium/high Bandit findings, without optional vision packages or hardware.
 The locked dependency audit found no known vulnerabilities in 111 registry versions;
 the pinned Git CLIP source is explicitly outside that advisory audit's scope.
@@ -125,3 +125,9 @@ the updated Transformers 5.10.4 environment and the pinned Tiny model; this was
 API compatibility verification, not an additional accuracy benchmark. Real inference, training and saved-video replay ran separately.
 Live webcam interaction and audio playback were not checked in this experiment.
 Recordings, labels, weights and generated outputs are excluded from the PR.
+
+Publication exposed an existing workflow integration-test bug: foreign Git commands
+inherited the caller's hook environment. The test now clears repository-local
+variables and verifies the caller's configuration remains unchanged, including
+a simulated hook invocation. This follows [Git's hook guidance](https://git-scm.com/docs/githooks).
+Push/security/coverage gates remain enabled.
