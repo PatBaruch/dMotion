@@ -153,15 +153,21 @@ def review_verdict(
     if review["state"] not in {"APPROVED", "COMMENTED"} or not review.get("submitted_at"):
         return False, "Codex review is pending, dismissed, or blocking"
     body = review.get("body") or ""
-    # A later error/finding must revoke an earlier clean submitted result too.
-    for comment in comments or []:
-        comment_body = comment.get("body") or ""
-        if (
-            is_codex(comment)
-            and (comment.get("updated_at") or "") > review["submitted_at"]
-            and (REVIEW_ERRORS.search(comment_body) or re.search(r"\[P[01]\]", comment_body))
-        ):
-            return False, "A newer Codex result reports an error or blocking finding"
+    # A newer result must be fully validated, including pending/unrecognized bodies.
+    newer = [
+        comment
+        for comment in comments or []
+        if is_codex(comment)
+        and (comment.get("updated_at") or comment.get("created_at") or "") > review["submitted_at"]
+        and (
+            (comment.get("body") or "").startswith("Codex Review:")
+            or REVIEW_ERRORS.search(comment.get("body") or "")
+        )
+    ]
+    if newer:
+        ok, reason = completion_comment_verdict(sha, newer, commits or [])
+        if not ok:
+            return False, f"A newer Codex result is not complete: {reason}"
     if REVIEW_ERRORS.search(body):
         return False, "Codex reported an unsuccessful review"
     if re.search(r"\[P[01]\]", body):

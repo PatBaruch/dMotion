@@ -232,6 +232,26 @@ def test_clean_comment_cannot_override_formal_blockers_or_unresolved_threads():
     assert not flow.review_verdict(SHA, [human], [], comments, commits)[0]
 
 
+@pytest.mark.parametrize(
+    "comment",
+    [
+        completion(body="Codex Review: running"),
+        completion(body=completion()["body"].replace(SHA[:10], BASE[:10])),
+        completion(updated_at=None),
+        completion(body="Codex Review: unknown result"),
+    ],
+)
+def test_newer_incomplete_result_revokes_a_valid_formal_review(comment):
+    assert not flow.review_verdict(SHA, [review()], [], [comment], [{"sha": SHA}])[0]
+    assert not flow.review_verdict(
+        SHA, [review(state="APPROVED", body="")], [], [comment], [{"sha": SHA}]
+    )[0]
+
+
+def test_newer_explicit_clean_result_can_confirm_a_valid_formal_review():
+    assert flow.review_verdict(SHA, [review()], [], [completion()], [{"sha": SHA}])[0]
+
+
 @pytest.mark.parametrize("change", [{"head_sha": BASE}, {"app": {"id": 2}}])
 def test_ci_requires_exact_head_and_verified_actions_app(change):
     runs = checks()
