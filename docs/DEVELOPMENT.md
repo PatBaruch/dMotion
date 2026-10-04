@@ -110,3 +110,8 @@ explicit hashed reference image; Grounding DINO Tiny/Base use the existing lazy
 Transformers adapter. Core tests fake optional dependencies and require no model
 downloads, webcam, GPU or audio. Real model/video experiments are separate evidence.
 Usage and reproducibility requirements are in `docs/TRAINING_HARNESS.md`.
+## Provided media
+
+Use `make organize-media` to sort loose recordings and photos. The organizer
+records checksums and path moves without editing dataset truth or frozen training
+evidence. See [file layout](FILE_LAYOUT.md) and the [YOLOE training route](YOLOE_FINETUNING.md).

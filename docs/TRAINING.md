@@ -23,7 +23,7 @@ wrong thing, even if you downloaded hundreds of pictures.
 Import local videos, then run automatic labeling before opening the review page:
 
 ```sh
-.venv/bin/dmotion import data/first.mp4 data/second.mp4 data/third.mp4 --interval 1
+.venv/bin/dmotion import data/videos/first.mp4 data/videos/second.mp4 data/videos/third.mp4 --interval 1
 make setup-labeling  # One-time optional dependency setup, after make setup.
 make auto-label
 make label
@@ -106,7 +106,7 @@ You can import existing photos, a folder, or a video:
 
 ```sh
 .venv/bin/dmotion import data/my-photos --group living-room-evening
-.venv/bin/dmotion import data/my-recording.mp4 --interval 1
+.venv/bin/dmotion import data/videos/my-recording.mp4 --interval 1
 ```
 
 Video import samples roughly one frame each second. Frames from the same video
@@ -219,7 +219,7 @@ session went into each split, its reviewed boxes, and small-dataset warnings.
 ```sh
 make trained
 # Check a photo that was not used for training:
-.venv/bin/dmotion image data/new-spread.jpg --mode trained --show
+.venv/bin/dmotion image data/photos/new-spread.jpg --mode trained --show
 ```
 
 Or double-click `trained.command`. Use new photos and new webcam conditions:
@@ -281,3 +281,8 @@ weights separately if you want to preserve them.
 For implementation details, see the official
 [Ultralytics training guide](https://docs.ultralytics.com/modes/train) and
 [object detection dataset format](https://docs.ultralytics.com/datasets/detect).
+
+Provided originals belong in `data/videos/` and `data/photos/`; reviewed frame
+copies stay in `data/training/`. Run `make organize-media` to sort loose uploads.
+See [file layout](FILE_LAYOUT.md). To understand the distinct fine-tuning route
+for the pretrained reference model, read [YOLOE fine-tuning](YOLOE_FINETUNING.md).

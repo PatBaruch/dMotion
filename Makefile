@@ -62,7 +62,7 @@ check:
 	.venv/bin/bandit -r src scripts --severity-level medium -f json -o reports/bandit.json
 	.venv/bin/pytest --cov --cov-report=term:skip-covered --cov-report=xml:reports/coverage.xml --cov-report=json:reports/coverage.json --junitxml=reports/junit.xml
 
-.PHONY: audit package-check
+.PHONY: audit package-check organize-media
 
 audit:
 	@mkdir -p reports
@@ -83,3 +83,6 @@ setup-workflow:
 
 finish-feature:
 	.venv/bin/python scripts/finish_feature.py $(ARGS)
+
+organize-media:
+	.venv/bin/python scripts/organize_media.py
