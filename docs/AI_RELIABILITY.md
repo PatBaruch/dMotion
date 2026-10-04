@@ -18,8 +18,9 @@ is bug-free, that the detector is accurate, or that an AI reviewer found every b
 4. Configured Codex automatic review adds a second examination of the code.
    While the task is active, the implementing agent reads findings, fixes relevant
    issues, and reruns checks for the updated commit.
-5. The maintainer checks the latest CI and review evidence before merging.
-   `develop` integrates features; a reviewed release PR promotes them to `main`.
+5. Trusted Gitflow automation rechecks exact-head CI and completed Codex review,
+   blocks unresolved findings, and merges opted-in PRs through protections.
+   Reviewed release and return-sync PRs maintain `main` and `develop`.
 
 ## What is checked
 
@@ -33,6 +34,7 @@ is bug-free, that the detector is accurate, or that an AI reviewer found every b
 | CodeQL | Python and GitHub Actions, extended security queries; scores at least 7.0 or error-level findings fail | SARIF and GitHub Security alerts |
 | Distribution | Locked build tools build a wheel and source archive; wheel installs into a fresh environment with hashed, locked core dependencies; CLI help/version work outside the source tree | Distribution files and SHA-256 checksums |
 | PR policy | Gitflow destination, useful title, and four completed documentation sections | `pr-policy` result |
+| AI review | Authenticated Codex bot, submitted review of the latest commit; absent, failed, stale, blocking reviews and unresolved threads fail | `ai-review`, native review ID and commit SHA |
 
 The coverage floor reflects a measured baseline, not a target for finished
 production software. Camera/UI paths are currently poorly covered and remain
@@ -59,6 +61,8 @@ External Actions are pinned to verified full commit hashes. Tool dependencies ar
 locked; build isolation is disabled so builds use the locked backend. Jobs have
 timeouts, do not retain checkout credentials, and normally receive only read
 permissions. Only CodeQL jobs receive the security-report upload permission.
+The separate trusted Gitflow job receives write scopes for checks, task branches,
+PRs, workflow dispatch, and protected merges, and executes only main's source.
 Privileged jobs do not execute PR code. Caches are disabled to keep the trust
 boundary and demonstration straightforward.
 
@@ -79,25 +83,34 @@ The weekly scheduled check on `main` also detects new advisories without a code
 change. Reports are retained for 14 days; distributions for 30 days. Download
 important demonstration evidence before expiry.
 
-## One-time maintainer actions
+## Account prerequisites and rollout
 
-- Merge the reliability feature PR into `develop` after its checks pass, then
-  promote the same changes to `main` through a release PR. Default-branch policy,
-  schedules, and Dependabot configuration become active on `main`.
+- Complete the repair through current-head reviewed feature and release PRs.
+  Default-branch policy, schedules, and Dependabot configuration activate on main;
+  then add the AI review gate to both protected branches without weakening checks.
 - In [Codex code review settings](https://chatgpt.com/codex/settings/code-review),
   connect `PatBaruch/dMotion`, enable repository code review and automatic review,
   and select a trigger covering new commits. Check personal preferences if the
   repository uses them. Verify the next PR receives an actual review.
+- Verify the account GitHub connection authorizes dMotion. A bot reply requesting
+  connection is a failed request even if the repository toggle saved.
+- Permit Actions to create promotion PRs; GitHub bundles this with approval
+  capability. This workflow never approves, and accepts only the independent
+  Codex connector as AI reviewer. Keep read-only default token permissions.
+- Enable Dependabot security updates and retain actual scheduled scan/update
+  evidence separately from configuration and manually dispatched runs.
 - Add an independent human reviewer and require an approving review when one is
   available. The current solo-maintainer protections use zero required approvals
   because GitHub prevents authors from approving their own PRs.
 
-AI comments are advisory; their absence is not a passing review. Current agent
+AI findings require inspection; their absence is not a passing review. Current agent
 instructions authorize merging only after CI/security and current-commit AI
 review gates pass. They do not authorize tagging or production deployment.
 The local completion behavior depends
 on an active agent following `AGENTS.md`; GitHub checks and configured reviews
-continue even after that chat stops. A stopped agent does not repair failures.
+and the deployed Gitflow loop continue after that chat stops. A stopped agent
+does not repair failures. Missing account access cannot be solved by pretending
+a review passed or copying the local user's token into repository secrets.
 
 ## Demonstrate the process
 

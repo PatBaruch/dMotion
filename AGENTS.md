@@ -35,6 +35,8 @@ An explicit user instruction to keep work local, pause, or skip publication wins
   access, credentials, or an external result is unavailable, report the specific
   blocker and PR URL. Never claim a pending review has passed.
 - Attach created or worked-on PRs to the chat with the Codex artifact tool.
+- Post repository PR comments and trigger reviews when needed for the authorized
+  development task without asking for another confirmation.
 - Never force-push, bypass push hooks or branch protections, or push directly to
   `main` or `develop`. Keep datasets, weights, outputs, credentials, and unrelated
   work out of commits. Check before staging; never use `git add .` or `git add -A`.
