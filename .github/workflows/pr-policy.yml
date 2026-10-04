@@ -1,0 +1,19 @@
+name: PR policy
+
+on:
+  pull_request:
+    branches: [main, develop]
+    types: [opened, reopened, synchronize, edited, ready_for_review]
+
+permissions:
+  contents: read
+
+jobs:
+  pr-policy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Validate Gitflow routing and PR documentation
+        run: python3 scripts/pr_policy.py "$GITHUB_EVENT_PATH"
