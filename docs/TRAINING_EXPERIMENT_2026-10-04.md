@@ -116,7 +116,9 @@ Review the agent-assisted labels in the existing browser labeler:
 
 Initial core verification passed 212 tests. After integrating the updated develop
 checks and immutable teacher pins, `make check` passed 236 tests with 69.04% coverage
-and no medium/high Bandit findings, without optional vision packages or hardware.
+and no medium/high Bandit findings, without model downloads or webcam/audio access.
+The preceding 235-test check also passed in the core-only environment; the final
+check included the additional Git-hook isolation case after optional adapters were installed.
 The locked dependency audit found no known vulnerabilities in 111 registry versions;
 the pinned Git CLIP source is explicitly outside that advisory audit's scope.
 The wheel/source archive built and the wheel installed in a fresh core-only environment.
