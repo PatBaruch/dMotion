@@ -67,6 +67,20 @@ def test_template_comments_are_not_documentation():
     assert len(errors) == 4
 
 
+def test_dependabot_exception_requires_verified_bot_metadata():
+    assert policy.validate_pull_request("develop", "dependabot/uv/tool", "Bump tool", BODY)
+    assert not policy.validate_pull_request(
+        "develop",
+        "dependabot/uv/tool",
+        "Bump tool",
+        "Updates tool with its changelog.",
+        maintenance_bot=True,
+    )
+    assert policy.validate_pull_request(
+        "develop", "feature/no-policy", "invalid", "", maintenance_bot=True
+    )
+
+
 def test_placeholder_in_a_required_section_is_rejected():
     body = BODY.replace("Updated the training guide", "TODO: update the training guide")
     assert any(

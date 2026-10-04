@@ -26,3 +26,6 @@ assets/*.ogg
 weights/
 runs/
 .worktrees/
+.coverage*
+reports/
+.package-smoke/

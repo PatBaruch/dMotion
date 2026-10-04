@@ -80,10 +80,15 @@ the prose fully explains the feature.
 - `.githooks/pre-push` blocks direct pushes/deletions to `main` and `develop`,
   refuses dirty worktrees or pushes of another branch's commit, rejects branch
   history rewrites, and runs `make check` before publishing code.
-- GitHub's `test` check runs the same Ruff lint/format and pytest commands on
-  pushes and PRs. It requires no camera, audio device, or model downloads.
+- GitHub's `test` check requires all six OS/Python core test runs, the locked
+  dependency audit, clean package installation, and Python/Actions CodeQL scans.
+  Local `make check` includes Ruff, Bandit, tests, timeouts, and a coverage floor.
+  These checks require no camera, audio device, or model downloads. Reports and
+  distribution artifacts are retained; see [AI reliability](AI_RELIABILITY.md).
 - GitHub's `pr-policy` check validates branch routing and the PR description.
-  Editing the description reruns this check.
+  Editing the description reruns this check. Its source is the trusted default
+  branch, so changes to that policy require promotion to `main` to take effect.
+  Verified Dependabot PRs use their own generated documentation.
 - Protected branches require both checks, an up-to-date branch, resolved review
   conversations, and PR-based changes. Force pushes/deletions and administrator
   bypasses are disabled. The solo-maintainer setup uses zero mandatory approving
