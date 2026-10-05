@@ -11,6 +11,7 @@ LABEL = "gitflow:auto"
 BOT_LOGIN = "chatgpt-codex-connector[bot]"
 BOT_ID = 199175422
 ACTIONS_APP = 15368
+ACTIONS_BOT_ID = 41898282
 CHECK = "ai-review"
 REQUIRED_CI = ("test", "pr-policy")
 REVIEW_ERRORS = re.compile(
@@ -410,6 +411,58 @@ def ensure_ci(github: GitHub, pr: dict) -> None:
     )
 
 
+def ensure_review(github: GitHub, evidence: dict) -> dict | None:
+    """Ask once per opted-in head for explicit, commit-bound native completion."""
+    pr, sha = evidence["pr"], evidence["head_sha"]
+    if (
+        evidence["review_ok"]
+        or evidence["policy_errors"]
+        or pr["state"] != "open"
+        or pr.get("draft")
+        or LABEL not in {label["name"] for label in pr["labels"]}
+        or (pr["head"].get("repo") or {}).get("full_name") != github.repo
+        or evidence["review_reason"]
+        in {
+            "Unresolved review conversations remain",
+            "A reviewer requested changes",
+            "Blocking findings remain in the current review summary",
+        }
+    ):
+        return None
+    marker = f"<!-- dmotion-codex-review:{sha} -->"
+    for comment in github.pages(f"issues/{pr['number']}/comments"):
+        user = comment.get("user") or {}
+        trusted = (
+            user.get("login") == "github-actions[bot]"
+            and user.get("id") == ACTIONS_BOT_ID
+            and user.get("type") == "Bot"
+        ) or (
+            user.get("type") == "User"
+            and comment.get("author_association") in {"OWNER", "MEMBER", "COLLABORATOR"}
+        )
+        body = comment.get("body") or ""
+        if trusted and body.startswith("@codex review\n") and f"`{sha}`" in body and marker in body:
+            return None
+    current = github.api(f"pulls/{pr['number']}")
+    if (
+        current["state"] != "open"
+        or current["head"]["sha"] != sha
+        or current.get("draft")
+        or LABEL not in {label["name"] for label in current["labels"]}
+    ):
+        raise NotReady("PR advanced, closed or changed opt-in before its review request")
+    return github.api(
+        f"issues/{pr['number']}/comments",
+        method="POST",
+        data={
+            "body": "@codex review\n\n"
+            f"Please review latest commit `{sha}` and include the reviewed commit in the result. "
+            "The protected merge gate requires a submitted review or explicit clean completion; "
+            "a reaction alone does not identify the reviewed commit.\n\n" + marker
+        },
+    )
+
+
 def update_base(github: GitHub, pr: dict) -> dict:
     """Integrate a newer protected base without rewriting the task branch."""
     base_sha = pr["base"]["sha"]
@@ -495,6 +548,7 @@ def process_pr(github: GitHub, pr: dict) -> dict:
     publish_gate(github, evidence, policy=True)
     if managed and not pr.get("draft") and same_repo:
         ensure_ci(github, evidence["pr"])
+        ensure_review(github, evidence)
         if evidence["review_ok"] and evidence["ci_ok"] and not evidence["policy_errors"]:
             result = merge_pr(github, pr["number"])
             return {"number": pr["number"], "merged": result["sha"]}
@@ -540,12 +594,17 @@ def main() -> int:
     parser.add_argument("--repo", required=True)
     parser.add_argument("--pr", type=int, help="Read current evidence for one PR")
     parser.add_argument("--merge", action="store_true", help="Merge only the inspected PR if ready")
+    parser.add_argument(
+        "--request-review", action="store_true", help="Request current-head review once"
+    )
     parser.add_argument("--pulse", action="store_true", help="Run trusted background orchestration")
     args = parser.parse_args()
     if args.pr and args.pulse:
         parser.error("Choose --pr or --pulse, not both")
     if args.merge and (not args.pr or args.pulse):
         parser.error("--merge requires --pr and cannot be combined with --pulse")
+    if args.request_review and (not args.pr or args.merge or args.pulse):
+        parser.error("--request-review requires --pr and cannot be combined with --merge/--pulse")
     github = GitHub(args.repo)
     if args.pulse:
         result = pulse(github)
@@ -553,6 +612,9 @@ def main() -> int:
         result = merge_pr(github, args.pr)
     elif args.pr:
         result = inspect_pr(github, args.pr)
+        if args.request_review:
+            request = ensure_review(github, result)
+            result["review_request"] = request["id"] if request else None
         result["pr"] = {key: result["pr"][key] for key in ("number", "html_url", "state")}
     else:
         parser.error("Choose --pr or --pulse")

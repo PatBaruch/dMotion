@@ -804,6 +804,139 @@ def test_one_pr_evidence_failure_revokes_its_gate_and_other_prs_still_progress(m
     merge.assert_called_once_with(client, 7)
 
 
+def request_evidence(client):
+    client.routes["GET", "pulls/7/reviews"] = []
+    client.routes["POST", "issues/7/comments"] = {"id": 42}
+    return flow.inspect_pr(client, 7)
+
+
+def test_review_request_binds_head_and_is_deduplicated_for_trusted_requester():
+    client = inspection_client()
+    evidence = request_evidence(client)
+    assert flow.ensure_review(client, evidence) == {"id": 42}
+    body = client.calls[-1][2]["body"]
+    assert body.startswith("@codex review\n") and SHA in body
+    assert f"<!-- dmotion-codex-review:{SHA} -->" in body
+    for user, association in [
+        ({"id": flow.ACTIONS_BOT_ID, "login": "github-actions[bot]", "type": "Bot"}, "NONE"),
+        ({"id": 123, "login": "owner", "type": "User"}, "OWNER"),
+    ]:
+        client.routes["GET", "issues/7/comments"] = [
+            {"body": body, "user": user, "author_association": association}
+        ]
+        client.calls.clear()
+        assert flow.ensure_review(client, evidence) is None
+        assert all(method == "GET" for _, method, _ in client.calls)
+
+
+@pytest.mark.parametrize(
+    "user,association",
+    [
+        ({"id": 1, "login": "github-actions[bot]", "type": "Bot"}, "NONE"),
+        ({"id": 1, "login": "outside", "type": "User"}, "NONE"),
+    ],
+)
+def test_untrusted_marker_cannot_suppress_native_review_request(user, association):
+    client = inspection_client()
+    evidence = request_evidence(client)
+    client.routes["GET", "issues/7/comments"] = [
+        {
+            "body": f"<!-- dmotion-codex-review:{SHA} -->",
+            "user": user,
+            "author_association": association,
+        }
+    ]
+    assert flow.ensure_review(client, evidence)["id"] == 42
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"draft": True},
+        {"labels": []},
+        {"state": "closed"},
+        {"head": {"sha": SHA, "ref": "feature/fix", "repo": {"full_name": "fork/repo"}}},
+    ],
+)
+def test_review_requests_preserve_drafts_closed_unrelated_and_fork_prs(change):
+    client = inspection_client(**change)
+    evidence = request_evidence(client)
+    client.calls.clear()
+    assert flow.ensure_review(client, evidence) is None
+    assert not client.calls
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"review_ok": True},
+        {"policy_errors": ["invalid route"]},
+        {"review_reason": "Unresolved review conversations remain"},
+        {"review_reason": "A reviewer requested changes"},
+        {"review_reason": "Blocking findings remain in the current review summary"},
+    ],
+)
+def test_completed_review_and_actionable_blockers_do_not_cause_repeated_requests(change):
+    client = inspection_client()
+    evidence = {**request_evidence(client), **change}
+    client.calls.clear()
+    assert flow.ensure_review(client, evidence) is None
+    assert not client.calls
+
+
+def test_quoted_marker_without_a_native_request_cannot_suppress_review():
+    client = inspection_client()
+    evidence = request_evidence(client)
+    client.routes["GET", "issues/7/comments"] = [
+        {
+            "body": f"Quoted marker <!-- dmotion-codex-review:{SHA} -->",
+            "user": {"id": 123, "type": "User"},
+            "author_association": "OWNER",
+        }
+    ]
+    assert flow.ensure_review(client, evidence)["id"] == 42
+
+
+@pytest.mark.parametrize("change", [{"draft": True}, {"labels": []}])
+def test_review_request_rechecks_draft_and_opt_in_before_posting(change):
+    client = inspection_client()
+    evidence = request_evidence(client)
+    client.routes["GET", "pulls/7"].update(change)
+    with pytest.raises(flow.NotReady):
+        flow.ensure_review(client, evidence)
+    assert all(method == "GET" for _, method, _ in client.calls)
+
+
+def test_new_head_gets_its_own_review_request_and_raced_head_is_not_requested():
+    client = inspection_client()
+    evidence = request_evidence(client)
+    client.routes["GET", "issues/7/comments"] = [
+        {
+            "body": f"<!-- dmotion-codex-review:{BASE} -->",
+            "user": {"id": 123, "type": "User"},
+            "author_association": "OWNER",
+        }
+    ]
+    assert flow.ensure_review(client, evidence)["id"] == 42
+    client.routes["GET", "pulls/7"]["head"]["sha"] = BASE
+    client.calls.clear()
+    with pytest.raises(flow.NotReady, match="advanced"):
+        flow.ensure_review(client, evidence)
+    assert all(method == "GET" for _, method, _ in client.calls)
+
+
+def test_explicit_request_command_posts_without_publishing_gate_or_merging(monkeypatch, capsys):
+    client = inspection_client()
+    request_evidence(client)
+    monkeypatch.setattr(flow, "GitHub", lambda _: client)
+    monkeypatch.setattr(
+        sys, "argv", ["flow", "--repo", "owner/repo", "--pr", "7", "--request-review"]
+    )
+    assert flow.main() == 0
+    assert json.loads(capsys.readouterr().out)["review_request"] == 42
+    assert [path for path, method, _ in client.calls if method != "GET"] == ["issues/7/comments"]
+
+
 def test_read_only_command_does_not_publish_or_merge(monkeypatch, capsys):
     client = inspection_client()
     monkeypatch.setattr(flow, "GitHub", lambda _: client)

@@ -142,6 +142,48 @@ def test_validation_evidence_is_replaced_for_the_latest_commit():
     assert "CI and Codex review run separately" in second
 
 
+def test_completion_requests_review_only_after_publishing_and_labeling_task_pr(
+    tmp_path, monkeypatch
+):
+    monkeypatch.chdir(tmp_path)
+    document = tmp_path / "body.md"
+    document.write_text(BODY)
+    monkeypatch.setattr(
+        sys, "argv", ["finish_feature.py", "--title", "feat: import", "--body-file", str(document)]
+    )
+    monkeypatch.setattr(finish, "changed_paths", lambda: set())
+    commands = []
+
+    def successful_run(*command, capture=False):
+        commands.append(command)
+        if command == ("git", "rev-parse", "--show-toplevel"):
+            return str(tmp_path)
+        if command == ("git", "branch", "--show-current"):
+            return "feature/import"
+        if command == ("git", "rev-parse", "HEAD"):
+            return "a" * 40
+        if command[:3] == ("gh", "repo", "view"):
+            return "owner/repo"
+        if command[:3] == ("gh", "pr", "list"):
+            return '[{"number":7,"url":"https://github.com/owner/repo/pull/7"}]'
+        return ""
+
+    monkeypatch.setattr(finish, "run", successful_run)
+    assert finish.main() == 0
+    label = next(i for i, command in enumerate(commands) if "--add-label" in command)
+    request = next(i for i, command in enumerate(commands) if "--request-review" in command)
+    assert request > label
+    assert commands[request] == (
+        sys.executable,
+        "scripts/gitflow_automation.py",
+        "--repo",
+        "owner/repo",
+        "--pr",
+        "7",
+        "--request-review",
+    )
+
+
 def test_failed_checks_never_stage_commit_push_or_open_a_pr(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     document = tmp_path / "body.md"

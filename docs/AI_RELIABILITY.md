@@ -85,6 +85,12 @@ important demonstration evidence before expiry.
 
 ## Account prerequisites and rollout
 
+Feature completion and the trusted Gitflow loop request explicit native review
+once per opted-in commit when completion is missing or stale. Automatic no-findings
+reviews may produce only a reaction; that cannot satisfy the commit-bound gate.
+Requests are deduplicated, preserve unmanaged/draft/fork PRs, and never substitute
+for a completed result. Account or review-allowance failures continue to block.
+
 - Complete the repair through current-head reviewed feature and release PRs.
   Default-branch policy, schedules, and Dependabot configuration activate on main;
   then add the AI review gate to both protected branches without weakening checks.

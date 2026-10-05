@@ -72,6 +72,11 @@ rerun after repairing the label.
 Rerunning after a partial failure preserves the commit and reuses an open PR.
 `make finish-feature ARGS='...'` exposes the same command.
 
+Completion requests native Codex review once for the current opted-in PR head,
+using a comment with the full SHA. Existing trusted requests for that SHA are
+deduplicated. An unavailable service or failed request is reported with the
+already-published PR preserved; it never counts as review completion.
+
 The PR records the tested commit and local check results. CI and review status
 remain pending until GitHub reports them. PR descriptions must explain the change,
 documentation updates, validation, and risks/limitations. The PR policy checks the
@@ -149,6 +154,15 @@ comment events refresh the gate; the scheduled loop also rechecks thread resolut
 Missing, pending, dismissed, stale, unrecognized, quota-failed, or P0/P1-blocking
 results fail. Unresolved threads and outstanding requests for changes also block.
 A toggle, reaction, or connection-error comment cannot pass.
+
+Automatic clean reviews may leave only a thumbs-up on the PR. Since that reaction
+does not identify a commit, the trusted loop requests an explicit native review
+once per managed head when completion is missing or stale. The request includes
+the full SHA and a deduplication marker; only requests from the verified Actions
+bot or repository collaborators suppress duplicates. Draft, closed, fork and
+unmanaged PRs are not requested. Known blocking findings need an active agent
+to resolve them; repeated pulses do not keep requesting the same commit. Native
+account/allowance errors remain blocking and are never treated as approval.
 
 Only `gitflow:auto` PRs from this repository are updated or merged. Unlabeled
 PRs are left alone apart from reporting policy/review checks. A newer protected
