@@ -137,9 +137,11 @@ Commit history uses GraphQL cursor pagination rather than the REST endpoint's
 250-commit limit. Incomplete, changing or excessive history fails the affected
 PR's gate; an evidence failure on one PR cannot prevent other eligible PRs from
 being inspected and processed. Such failures are recorded in the workflow output.
-Comments cannot override pending/dismissed/blocking formal reviews. Review and
-completion comments sharing a one-second timestamp are ordered conservatively:
-an incomplete comment in that same second blocks the formal result. Review and
+Comments cannot override pending/dismissed/blocking current-head formal reviews.
+Formal reviews for every commit and completion comments are compared together by
+submission/edit time: an older-commit run finishing late revokes an earlier clean
+current-head result. Every result in the newest one-second timestamp must pass;
+creation IDs cannot resolve ties across reviews, comments or edits. Review and
 comment events refresh the gate; the scheduled loop also rechecks thread resolution.
 Missing, pending, dismissed, stale, unrecognized, quota-failed, or P0/P1-blocking
 results fail. Unresolved threads and outstanding requests for changes also block.

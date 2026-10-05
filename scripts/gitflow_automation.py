@@ -137,33 +137,6 @@ def is_codex(item: dict) -> bool:
     return user.get("login") == BOT_LOGIN and user.get("id") == BOT_ID and user.get("type") == "Bot"
 
 
-def completion_comment_verdict(
-    sha: str, comments: list[dict], commits: list[dict]
-) -> tuple[bool, str]:
-    """Recognize only the observed native no-findings result, never a reaction."""
-    candidates = [
-        item
-        for item in comments
-        if is_codex(item)
-        and (
-            (item.get("body") or "").startswith("Codex Review:")
-            or REVIEW_ERRORS.search(item.get("body") or "")
-        )
-    ]
-    if not candidates:
-        return False, f"No completed Codex review for current head {sha}"
-    if any(not item.get("created_at") or not item.get("updated_at") for item in candidates):
-        return False, "Codex completion comment lacks submission evidence"
-    latest = max(item["updated_at"] for item in candidates)
-    tied = [item for item in candidates if item["updated_at"] == latest]
-    # IDs order creation, not edits. Validate every result tied within one second.
-    for comment in sorted(tied, key=lambda item: item["id"]):
-        ok, reason = validate_completion_comment(sha, comment, commits)
-        if not ok:
-            return False, reason
-    return ok, reason
-
-
 def validate_completion_comment(sha: str, comment: dict, commits: list[dict]) -> tuple[bool, str]:
     body = comment.get("body") or ""
     if REVIEW_ERRORS.search(body) or re.search(r"\[P[01]\]", body):
@@ -184,6 +157,21 @@ def validate_completion_comment(sha: str, comment: dict, commits: list[dict]) ->
     return True, f"Codex completion comment {comment['id']} covers {sha}; no unresolved blockers"
 
 
+def validate_formal_review(sha: str, review: dict) -> tuple[bool, str]:
+    if review.get("commit_id") != sha:
+        return False, "Latest Codex formal review covers a stale commit"
+    if review["state"] not in {"APPROVED", "COMMENTED"} or not review.get("submitted_at"):
+        return False, "Codex review is pending, dismissed, or blocking"
+    body = review.get("body") or ""
+    if REVIEW_ERRORS.search(body):
+        return False, "Codex reported an unsuccessful review"
+    if re.search(r"\[P[01]\]", body):
+        return False, "Blocking findings remain in the current review summary"
+    if review["state"] == "COMMENTED" and "codex review" not in body.lower():
+        return False, "Unrecognized Codex completion; an explicit reviewed result is required"
+    return True, f"Codex review {review['id']} covers {sha}; no unresolved blockers"
+
+
 def review_verdict(
     sha: str,
     reviews: list[dict],
@@ -201,35 +189,49 @@ def review_verdict(
         return False, "A reviewer requested changes"
     if any(not thread["isResolved"] for thread in threads):
         return False, "Unresolved review conversations remain"
-    matching = [item for item in reviews if is_codex(item) and item.get("commit_id") == sha]
-    if not matching:
-        return completion_comment_verdict(sha, comments or [], commits or [])
-    review = max(matching, key=lambda item: item["id"])
-    if review["state"] not in {"APPROVED", "COMMENTED"} or not review.get("submitted_at"):
-        return False, "Codex review is pending, dismissed, or blocking"
-    body = review.get("body") or ""
-    # A newer result must be fully validated, including pending/unrecognized bodies.
-    newer = [
-        comment
-        for comment in comments or []
-        if is_codex(comment)
-        and (comment.get("updated_at") or comment.get("created_at") or "") >= review["submitted_at"]
+    formal = [item for item in reviews if is_codex(item)]
+    candidates = [
+        item
+        for item in comments or []
+        if is_codex(item)
         and (
-            (comment.get("body") or "").startswith("Codex Review:")
-            or REVIEW_ERRORS.search(comment.get("body") or "")
+            (item.get("body") or "").startswith("Codex Review:")
+            or REVIEW_ERRORS.search(item.get("body") or "")
         )
     ]
-    if newer:
-        ok, reason = completion_comment_verdict(sha, newer, commits or [])
+    if any(not item.get("submitted_at") for item in formal):
+        return False, "Codex formal review lacks submission evidence"
+    if any(not item.get("created_at") or not item.get("updated_at") for item in candidates):
+        return False, "Codex completion comment lacks submission evidence"
+    # A completion comment cannot withdraw an explicit current-head formal blocker.
+    matching = [item for item in formal if item.get("commit_id") == sha]
+    if matching:
+        latest = max(item["submitted_at"] for item in matching)
+        for review in matching:
+            if review["submitted_at"] == latest:
+                ok, reason = validate_formal_review(sha, review)
+                if not ok:
+                    return False, reason
+    # Compare all authenticated results BEFORE checking their commit. Older runs
+    # can finish late; filtering them out first would hide a newer stale result.
+    events = [(item["submitted_at"], "formal", item) for item in formal]
+    events.extend((item["updated_at"], "comment", item) for item in candidates)
+    if not events:
+        return False, f"No completed Codex review for current head {sha}"
+    latest = max(timestamp for timestamp, _, _ in events)
+    # IDs from different tables or before edits cannot resolve one-second ties.
+    # Every result in the newest second must be a completed current-head result.
+    for timestamp, kind, item in events:
+        if timestamp != latest:
+            continue
+        ok, reason = (
+            validate_formal_review(sha, item)
+            if kind == "formal"
+            else validate_completion_comment(sha, item, commits or [])
+        )
         if not ok:
-            return False, f"A newer Codex result is not complete: {reason}"
-    if REVIEW_ERRORS.search(body):
-        return False, "Codex reported an unsuccessful review"
-    if re.search(r"\[P[01]\]", body):
-        return False, "Blocking findings remain in the current review summary"
-    if review["state"] == "COMMENTED" and "codex review" not in body.lower():
-        return False, "Unrecognized Codex completion; an explicit reviewed result is required"
-    return True, f"Codex review {review['id']} covers {sha}; no unresolved blockers"
+            return False, reason
+    return ok, reason
 
 
 def ci_verdict(sha: str, checks: list[dict]) -> tuple[bool, str]:

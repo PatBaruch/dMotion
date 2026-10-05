@@ -278,6 +278,36 @@ def test_same_second_edited_comment_cannot_be_ordered_by_creation_id():
     assert not flow.review_verdict(SHA, [review()], [], [clean, edited], [{"sha": SHA}])[0]
 
 
+@pytest.mark.parametrize("state", ["COMMENTED", "APPROVED", "PENDING", "DISMISSED"])
+@pytest.mark.parametrize("current_result", ["formal", "comment"])
+def test_late_formal_review_of_previous_head_revokes_current_completion(state, current_result):
+    stale = review(id=13, commit_id=BASE, state=state, submitted_at="2026-10-04T21:29:00Z")
+    reviews = [review(), stale] if current_result == "formal" else [stale]
+    comments = [] if current_result == "formal" else [completion()]
+    assert not flow.review_verdict(SHA, reviews, [], comments, [{"sha": SHA}])[0]
+
+
+@pytest.mark.parametrize("current_result", ["formal", "comment"])
+def test_current_completion_supersedes_earlier_stale_formal_result(current_result):
+    stale = review(id=999, commit_id=BASE, submitted_at="2026-10-04T11:59:59Z")
+    reviews = [stale, review()] if current_result == "formal" else [stale]
+    comments = [] if current_result == "formal" else [completion()]
+    assert flow.review_verdict(SHA, reviews, [], comments, [{"sha": SHA}])[0]
+
+
+@pytest.mark.parametrize("current_result", ["formal", "comment"])
+def test_same_second_stale_formal_result_blocks_even_with_lower_id(current_result):
+    timestamp = review()["submitted_at"]
+    stale = review(id=1, commit_id=BASE)
+    reviews = [review(), stale] if current_result == "formal" else [stale]
+    comments = (
+        []
+        if current_result == "formal"
+        else [completion(created_at=timestamp, updated_at=timestamp)]
+    )
+    assert not flow.review_verdict(SHA, reviews, [], comments, [{"sha": SHA}])[0]
+
+
 @pytest.mark.parametrize("change", [{"head_sha": BASE}, {"app": {"id": 2}}])
 def test_ci_requires_exact_head_and_verified_actions_app(change):
     runs = checks()
