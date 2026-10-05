@@ -78,6 +78,9 @@ class FakeGitHub:
     def threads(self, number):
         return self.review_threads
 
+    def commits(self, number):
+        return self.api(f"pulls/{number}/commits")
+
 
 def inspection_client(**changes):
     pull = pr(**changes)
@@ -564,6 +567,92 @@ def test_review_thread_pagination_errors_fail_closed(monkeypatch):
     run.return_value = subprocess.CompletedProcess([], 0, stdout='{"errors": ["denied"]}')
     with pytest.raises(ValueError, match="query failed"):
         flow.GitHub("owner/repo").threads(7)
+
+
+def commit_page(start, stop, total, cursor=None):
+    return subprocess.CompletedProcess(
+        [],
+        0,
+        stdout=json.dumps(
+            {
+                "data": {
+                    "repository": {
+                        "pullRequest": {
+                            "commits": {
+                                "totalCount": total,
+                                "nodes": [
+                                    {"commit": {"oid": f"{index:040x}"}}
+                                    for index in range(start, stop)
+                                ],
+                                "pageInfo": {
+                                    "hasNextPage": cursor is not None,
+                                    "endCursor": cursor,
+                                },
+                            }
+                        }
+                    }
+                }
+            }
+        ),
+    )
+
+
+def test_graphql_reads_complete_pr_history_beyond_rest_cap(monkeypatch):
+    run = Mock(
+        side_effect=[
+            commit_page(0, 100, 251, "page1"),
+            commit_page(100, 200, 251, "page2"),
+            commit_page(200, 251, 251),
+        ]
+    )
+    monkeypatch.setattr(flow.subprocess, "run", run)
+    commits = flow.GitHub("owner/repo").commits(7)
+    assert len(commits) == 251 and commits[-1]["sha"] == f"{250:040x}"
+    assert json.loads(run.call_args.kwargs["input"])["variables"]["cursor"] == "page2"
+
+
+@pytest.mark.parametrize(
+    "pages",
+    [
+        [commit_page(0, 1, 2)],
+        [commit_page(0, 1, 2, "page1"), commit_page(0, 1, 2)],
+        [commit_page(0, 1, 2, "page1"), commit_page(1, 2, 3)],
+        [commit_page(0, 1, 3, "page1"), commit_page(1, 2, 3, "page1")],
+        [subprocess.CompletedProcess([], 0, stdout='{"errors": ["denied"]}')],
+    ],
+)
+def test_graphql_history_rejects_incomplete_duplicate_raced_or_failed_pages(monkeypatch, pages):
+    monkeypatch.setattr(flow.subprocess, "run", Mock(side_effect=pages))
+    with pytest.raises(ValueError):
+        flow.GitHub("owner/repo").commits(7)
+
+
+def test_one_pr_evidence_failure_revokes_its_gate_and_other_prs_still_progress(monkeypatch):
+    blocked, healthy = pr(number=6), pr()
+    client = FakeGitHub({("GET", "pulls?state=open"): [blocked, healthy]})
+    evidence = {
+        "pr": healthy,
+        "head_sha": SHA,
+        "review_reason": "complete",
+        "review_ok": True,
+        "ci_ok": True,
+        "policy_errors": [],
+    }
+    monkeypatch.setattr(
+        flow, "inspect_pr", Mock(side_effect=[ValueError("Incomplete history"), evidence])
+    )
+    publish = Mock()
+    monkeypatch.setattr(flow, "publish_gate", publish)
+    monkeypatch.setattr(flow, "update_base", Mock())
+    monkeypatch.setattr(flow, "ensure_ci", Mock())
+    merge = Mock(return_value={"sha": BASE})
+    monkeypatch.setattr(flow, "merge_pr", merge)
+    monkeypatch.setattr(flow, "create_promotion", lambda *_: None)
+    results = flow.pulse(client)
+    assert results[0]["number"] == 6 and "Incomplete history" in results[0]["blocked"]
+    assert not publish.call_args_list[0].args[1]["review_ok"]
+    assert results[1]["merged"] == BASE
+    merge.assert_called_once_with(client, 7)
 
 
 def test_read_only_command_does_not_publish_or_merge(monkeypatch, capsys):

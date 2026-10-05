@@ -86,6 +86,51 @@ class GitHub:
             cursor = page["pageInfo"]["endCursor"]
         raise ValueError("Review-thread pagination limit exceeded")
 
+    def commits(self, number: int) -> list:
+        """GraphQL cursor pagination avoids the REST PR endpoint's 250-commit cap."""
+        owner, name = self.repo.split("/")
+        query = """query($owner:String!,$name:String!,$number:Int!,$cursor:String){
+          repository(owner:$owner,name:$name){pullRequest(number:$number){
+            commits(first:100,after:$cursor){totalCount nodes{commit{oid}}
+              pageInfo{hasNextPage endCursor}}}}}"""
+        commits, cursors, cursor, total = [], set(), None, None
+        for _ in range(100):
+            result = subprocess.run(
+                ["gh", "api", "graphql", "--input", "-"],
+                input=json.dumps(
+                    {
+                        "query": query,
+                        "variables": {
+                            "owner": owner,
+                            "name": name,
+                            "number": number,
+                            "cursor": cursor,
+                        },
+                    }
+                ),
+                text=True,
+                capture_output=True,
+                check=True,
+                timeout=60,
+            )
+            response = json.loads(result.stdout)
+            if response.get("errors"):
+                raise ValueError("PR commit query failed; refusing incomplete evidence")
+            page = response["data"]["repository"]["pullRequest"]["commits"]
+            if total is not None and page["totalCount"] != total:
+                raise ValueError("PR commit history changed during pagination")
+            total = page["totalCount"]
+            commits.extend({"sha": node["commit"]["oid"]} for node in page["nodes"])
+            if not page["pageInfo"]["hasNextPage"]:
+                if len(commits) != total or len({item["sha"] for item in commits}) != total:
+                    raise ValueError("Incomplete or duplicated PR commit history")
+                return commits
+            cursor = page["pageInfo"]["endCursor"]
+            if not cursor or cursor in cursors:
+                raise ValueError("PR commit pagination did not advance")
+            cursors.add(cursor)
+        raise ValueError("PR commit pagination limit exceeded")
+
 
 def is_codex(item: dict) -> bool:
     user = item.get("user") or {}
@@ -208,7 +253,7 @@ def inspect_pr(github: GitHub, number: int) -> dict:
     sha = pr["head"]["sha"]
     reviews = github.pages(f"pulls/{number}/reviews")
     comments = github.pages(f"issues/{number}/comments")
-    commits = github.pages(f"pulls/{number}/commits")
+    commits = github.commits(number)
     if len(commits) != pr.get("commits", len(commits)):
         raise ValueError("Incomplete PR commit history; refusing ambiguous review evidence")
     review_ok, review_reason = review_verdict(
@@ -392,33 +437,50 @@ def create_promotion(github: GitHub, open_prs: list[dict]) -> dict | None:
     return pr
 
 
+def process_pr(github: GitHub, pr: dict) -> dict:
+    managed = LABEL in {label["name"] for label in pr["labels"]}
+    same_repo = (pr["head"].get("repo") or {}).get("full_name") == github.repo
+    if managed and not pr.get("draft") and same_repo:
+        update_base(github, pr)
+    evidence = inspect_pr(github, pr["number"])
+    publish_gate(github, evidence)
+    publish_gate(github, evidence, policy=True)
+    if managed and not pr.get("draft") and same_repo:
+        ensure_ci(github, evidence["pr"])
+        if evidence["review_ok"] and evidence["ci_ok"] and not evidence["policy_errors"]:
+            result = merge_pr(github, pr["number"])
+            return {"number": pr["number"], "merged": result["sha"]}
+    return {
+        "number": pr["number"],
+        "head": evidence["head_sha"],
+        "review": evidence["review_reason"],
+    }
+
+
 def pulse(github: GitHub) -> list[dict]:
     results = []
     open_prs = github.pages("pulls?state=open")
     for pr in open_prs:
-        managed = LABEL in {label["name"] for label in pr["labels"]}
-        same_repo = (pr["head"].get("repo") or {}).get("full_name") == github.repo
-        if managed and not pr.get("draft") and same_repo:
-            update_base(github, pr)
-        evidence = inspect_pr(github, pr["number"])
-        publish_gate(github, evidence)
-        publish_gate(github, evidence, policy=True)
-        if managed and not pr.get("draft") and same_repo:
-            ensure_ci(github, evidence["pr"])
-            if evidence["review_ok"] and evidence["ci_ok"] and not evidence["policy_errors"]:
-                try:
-                    result = merge_pr(github, pr["number"])
-                    results.append({"number": pr["number"], "merged": result["sha"]})
-                except NotReady as error:
-                    results.append({"number": pr["number"], "waiting": str(error)})
-                continue
-        results.append(
-            {
-                "number": pr["number"],
-                "head": evidence["head_sha"],
-                "review": evidence["review_reason"],
-            }
-        )
+        try:
+            results.append(process_pr(github, pr))
+        except NotReady as error:
+            results.append({"number": pr["number"], "waiting": str(error)})
+        except (ValueError, subprocess.CalledProcessError) as error:
+            # Fail this PR closed without letting its evidence abort all other work.
+            blocked = {"number": pr["number"], "blocked": str(error)}
+            try:
+                publish_gate(
+                    github,
+                    {
+                        "pr": pr,
+                        "head_sha": pr["head"]["sha"],
+                        "review_ok": False,
+                        "review_reason": f"Evidence unavailable or incomplete: {error}",
+                    },
+                )
+            except (ValueError, subprocess.CalledProcessError) as gate_error:
+                blocked["gate_unavailable"] = str(gate_error)
+            results.append(blocked)
     created = create_promotion(github, github.pages("pulls?state=open"))
     if created:
         results.append({"created": created["html_url"]})

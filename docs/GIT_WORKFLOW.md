@@ -133,6 +133,10 @@ observed `Codex Review: Didn't find any major issues.` result with an explicit
 `Reviewed commit` is accepted from that same verified bot. A shortened SHA must
 uniquely identify the current head among the PR's commits; at least ten hexadecimal
 characters are required. The newest bot result must be complete and successful.
+Commit history uses GraphQL cursor pagination rather than the REST endpoint's
+250-commit limit. Incomplete, changing or excessive history fails the affected
+PR's gate; an evidence failure on one PR cannot prevent other eligible PRs from
+being inspected and processed. Such failures are recorded in the workflow output.
 Comments cannot override pending/dismissed/blocking formal reviews. Review and
 completion comments sharing a one-second timestamp are ordered conservatively:
 an incomplete comment in that same second blocks the formal result. Review and
