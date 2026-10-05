@@ -776,7 +776,15 @@ def test_graphql_history_rejects_incomplete_duplicate_raced_or_failed_pages(monk
         flow.GitHub("owner/repo").commits(7)
 
 
-def test_one_pr_evidence_failure_revokes_its_gate_and_other_prs_still_progress(monkeypatch):
+@pytest.mark.parametrize(
+    "error",
+    [
+        ValueError("Incomplete history"),
+        subprocess.CalledProcessError(1, ["gh", "api"]),
+        subprocess.TimeoutExpired(["gh", "api"], 60),
+    ],
+)
+def test_one_pr_evidence_failure_revokes_its_gate_and_other_prs_still_progress(monkeypatch, error):
     blocked, healthy = pr(number=6), pr()
     client = FakeGitHub({("GET", "pulls?state=open"): [blocked, healthy]})
     evidence = {
@@ -787,9 +795,7 @@ def test_one_pr_evidence_failure_revokes_its_gate_and_other_prs_still_progress(m
         "ci_ok": True,
         "policy_errors": [],
     }
-    monkeypatch.setattr(
-        flow, "inspect_pr", Mock(side_effect=[ValueError("Incomplete history"), evidence])
-    )
+    monkeypatch.setattr(flow, "inspect_pr", Mock(side_effect=[error, evidence]))
     publish = Mock()
     monkeypatch.setattr(flow, "publish_gate", publish)
     monkeypatch.setattr(flow, "update_base", Mock())
@@ -798,10 +804,32 @@ def test_one_pr_evidence_failure_revokes_its_gate_and_other_prs_still_progress(m
     monkeypatch.setattr(flow, "merge_pr", merge)
     monkeypatch.setattr(flow, "create_promotion", lambda *_: None)
     results = flow.pulse(client)
-    assert results[0]["number"] == 6 and "Incomplete history" in results[0]["blocked"]
+    assert results[0]["number"] == 6 and str(error) in results[0]["blocked"]
     assert not publish.call_args_list[0].args[1]["review_ok"]
     assert results[1]["merged"] == BASE
     merge.assert_called_once_with(client, 7)
+
+
+def test_timed_out_gate_publication_does_not_stop_later_prs(monkeypatch):
+    client = FakeGitHub({("GET", "pulls?state=open"): [pr(number=6), pr()]})
+    monkeypatch.setattr(
+        flow,
+        "process_pr",
+        Mock(
+            side_effect=[
+                subprocess.TimeoutExpired(["gh", "api"], 60),
+                {"number": 7, "merged": BASE},
+            ]
+        ),
+    )
+    monkeypatch.setattr(
+        flow, "publish_gate", Mock(side_effect=subprocess.TimeoutExpired(["gh", "api"], 60))
+    )
+    monkeypatch.setattr(flow, "create_promotion", Mock(return_value=None))
+    results = flow.pulse(client)
+    assert "timed out" in results[0]["blocked"]
+    assert "timed out" in results[0]["gate_unavailable"]
+    assert results[1]["merged"] == BASE
 
 
 def request_evidence(client):

@@ -567,7 +567,7 @@ def pulse(github: GitHub) -> list[dict]:
             results.append(process_pr(github, pr))
         except NotReady as error:
             results.append({"number": pr["number"], "waiting": str(error)})
-        except (ValueError, subprocess.CalledProcessError) as error:
+        except (ValueError, subprocess.CalledProcessError, subprocess.TimeoutExpired) as error:
             # Fail this PR closed without letting its evidence abort all other work.
             blocked = {"number": pr["number"], "blocked": str(error)}
             try:
@@ -580,7 +580,11 @@ def pulse(github: GitHub) -> list[dict]:
                         "review_reason": f"Evidence unavailable or incomplete: {error}",
                     },
                 )
-            except (ValueError, subprocess.CalledProcessError) as gate_error:
+            except (
+                ValueError,
+                subprocess.CalledProcessError,
+                subprocess.TimeoutExpired,
+            ) as gate_error:
                 blocked["gate_unavailable"] = str(gate_error)
             results.append(blocked)
     created = create_promotion(github, github.pages("pulls?state=open"))
