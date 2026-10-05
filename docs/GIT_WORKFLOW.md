@@ -138,8 +138,11 @@ Commit history uses GraphQL cursor pagination rather than the REST endpoint's
 PR's gate; an evidence failure on one PR cannot prevent other eligible PRs from
 being inspected and processed. Such failures are recorded in the workflow output.
 Comments cannot override pending/dismissed/blocking current-head formal reviews.
-Formal reviews for every commit and completion comments are compared together by
-submission/edit time: an older-commit run finishing late revokes an earlier clean
+Formal reviews include GraphQL update/edit timestamps, matched by REST node identity
+and checked for changes between the two API reads; missing or inconsistent evidence
+blocks the affected PR. Formal reviews for every commit and completion comments
+are compared together by submission/edit time: a late review or an edited
+older-commit result revokes an earlier clean
 current-head result. Every result in the newest one-second timestamp must pass;
 creation IDs cannot resolve ties across reviews, comments or edits. Review and
 comment events refresh the gate; the scheduled loop also rechecks thread resolution.

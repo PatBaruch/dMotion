@@ -56,6 +56,48 @@ class GitHub:
                 return items
         raise ValueError("Pagination limit exceeded; refusing incomplete evidence")
 
+    def reviews(self, number: int) -> list:
+        """REST authenticates reviewers; GraphQL supplies omitted edit timestamps."""
+        reviews = self.pages(f"pulls/{number}/reviews")
+        query = """query($ids:[ID!]!){nodes(ids:$ids){... on PullRequestReview{
+          id updatedAt lastEditedAt submittedAt state body commit{oid}}}}"""
+        for start in range(0, len(reviews), 100):
+            batch = reviews[start : start + 100]
+            ids = [item.get("node_id") for item in batch]
+            if not all(ids) or len(set(ids)) != len(ids):
+                raise ValueError("Formal review node identities are incomplete")
+            result = subprocess.run(
+                ["gh", "api", "graphql", "--input", "-"],
+                input=json.dumps({"query": query, "variables": {"ids": ids}}),
+                text=True,
+                capture_output=True,
+                check=True,
+                timeout=60,
+            )
+            response = json.loads(result.stdout)
+            if response.get("errors"):
+                raise ValueError("Review edit query failed; refusing incomplete evidence")
+            nodes = response["data"]["nodes"]
+            if (
+                len(nodes) != len(ids)
+                or any(not node or not node.get("updatedAt") for node in nodes)
+                or {node["id"] for node in nodes} != set(ids)
+            ):
+                raise ValueError("Formal review edit history is incomplete")
+            by_id = {node["id"]: node for node in nodes}
+            for item in batch:
+                node = by_id[item["node_id"]]
+                if (
+                    (item.get("body") or "") != node["body"]
+                    or item["state"] != node["state"]
+                    or item.get("submitted_at") != node["submittedAt"]
+                    or item.get("commit_id") != (node.get("commit") or {}).get("oid")
+                ):
+                    raise ValueError("Formal review changed while reading edit evidence")
+                item["updated_at"] = node["updatedAt"]
+                item["last_edited_at"] = node["lastEditedAt"]
+        return reviews
+
     def threads(self, number: int) -> list:
         owner, name = self.repo.split("/")
         query = """query($owner:String!,$name:String!,$number:Int!,$cursor:String){
@@ -172,6 +214,10 @@ def validate_formal_review(sha: str, review: dict) -> tuple[bool, str]:
     return True, f"Codex review {review['id']} covers {sha}; no unresolved blockers"
 
 
+def formal_review_time(review: dict) -> str:
+    return max(review["submitted_at"], review["updated_at"], review.get("last_edited_at") or "")
+
+
 def review_verdict(
     sha: str,
     reviews: list[dict],
@@ -199,22 +245,22 @@ def review_verdict(
             or REVIEW_ERRORS.search(item.get("body") or "")
         )
     ]
-    if any(not item.get("submitted_at") for item in formal):
-        return False, "Codex formal review lacks submission evidence"
+    if any(not item.get("submitted_at") or not item.get("updated_at") for item in formal):
+        return False, "Codex formal review lacks submission/edit evidence"
     if any(not item.get("created_at") or not item.get("updated_at") for item in candidates):
         return False, "Codex completion comment lacks submission evidence"
     # A completion comment cannot withdraw an explicit current-head formal blocker.
     matching = [item for item in formal if item.get("commit_id") == sha]
     if matching:
-        latest = max(item["submitted_at"] for item in matching)
+        latest = max(formal_review_time(item) for item in matching)
         for review in matching:
-            if review["submitted_at"] == latest:
+            if formal_review_time(review) == latest:
                 ok, reason = validate_formal_review(sha, review)
                 if not ok:
                     return False, reason
     # Compare all authenticated results BEFORE checking their commit. Older runs
     # can finish late; filtering them out first would hide a newer stale result.
-    events = [(item["submitted_at"], "formal", item) for item in formal]
+    events = [(formal_review_time(item), "formal", item) for item in formal]
     events.extend((item["updated_at"], "comment", item) for item in candidates)
     if not events:
         return False, f"No completed Codex review for current head {sha}"
@@ -253,7 +299,7 @@ def ci_verdict(sha: str, checks: list[dict]) -> tuple[bool, str]:
 def inspect_pr(github: GitHub, number: int) -> dict:
     pr = github.api(f"pulls/{number}")
     sha = pr["head"]["sha"]
-    reviews = github.pages(f"pulls/{number}/reviews")
+    reviews = github.reviews(number)
     comments = github.pages(f"issues/{number}/comments")
     commits = github.commits(number)
     if len(commits) != pr.get("commits", len(commits)):

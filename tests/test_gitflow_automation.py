@@ -21,6 +21,7 @@ def review(**changes):
         "commit_id": SHA,
         "state": "COMMENTED",
         "submitted_at": "2026-10-04T12:00:00Z",
+        "updated_at": changes.get("submitted_at", "2026-10-04T12:00:00Z"),
         "body": "Codex Review: no blocking findings.",
         **changes,
     }
@@ -81,6 +82,9 @@ class FakeGitHub:
     def commits(self, number):
         return self.api(f"pulls/{number}/commits")
 
+    def reviews(self, number):
+        return self.api(f"pulls/{number}/reviews")
+
 
 def inspection_client(**changes):
     pull = pr(**changes)
@@ -110,6 +114,7 @@ def test_only_completed_authenticated_current_review_passes():
         ([review(state="DISMISSED")], []),
         ([review(state="CHANGES_REQUESTED")], []),
         ([review(submitted_at=None)], []),
+        ([review(updated_at=None)], []),
         ([review(user={"id": 2, "login": flow.BOT_LOGIN, "type": "Bot"})], []),
         ([review(user={"id": flow.BOT_ID, "login": flow.BOT_LOGIN, "type": "User"})], []),
         ([review(body="Codex Review: quota exhausted, cannot complete review")], []),
@@ -306,6 +311,25 @@ def test_same_second_stale_formal_result_blocks_even_with_lower_id(current_resul
         else [completion(created_at=timestamp, updated_at=timestamp)]
     )
     assert not flow.review_verdict(SHA, reviews, [], comments, [{"sha": SHA}])[0]
+
+
+@pytest.mark.parametrize("head", [SHA, BASE])
+@pytest.mark.parametrize("field", ["updated_at", "last_edited_at"])
+def test_late_edit_of_formal_review_revokes_newer_clean_completion(head, field):
+    edited = review(
+        id=1,
+        commit_id=head,
+        body="Codex Review: [P1] Edited blocker",
+        **{field: "2026-10-04T21:29:00Z"},
+    )
+    assert not flow.review_verdict(SHA, [edited, review()], [], [completion()], [{"sha": SHA}])[0]
+
+
+def test_same_second_formal_edit_and_clean_comment_cannot_be_ordered_by_id():
+    edited = review(
+        id=1, body="Codex Review: [P1] Edited blocker", updated_at=completion()["updated_at"]
+    )
+    assert not flow.review_verdict(SHA, [edited], [], [completion()], [{"sha": SHA}])[0]
 
 
 @pytest.mark.parametrize("change", [{"head_sha": BASE}, {"app": {"id": 2}}])
@@ -597,6 +621,101 @@ def test_review_thread_pagination_errors_fail_closed(monkeypatch):
     run.return_value = subprocess.CompletedProcess([], 0, stdout='{"errors": ["denied"]}')
     with pytest.raises(ValueError, match="query failed"):
         flow.GitHub("owner/repo").threads(7)
+
+
+def review_nodes(items):
+    return subprocess.CompletedProcess(
+        [],
+        0,
+        stdout=json.dumps(
+            {
+                "data": {
+                    "nodes": [
+                        {
+                            "id": item["node_id"],
+                            "updatedAt": item["updated_at"],
+                            "lastEditedAt": item.get("last_edited_at"),
+                            "submittedAt": item["submitted_at"],
+                            "state": item["state"],
+                            "body": item["body"],
+                            "commit": {"oid": item["commit_id"]},
+                        }
+                        for item in items
+                    ]
+                }
+            }
+        ),
+    )
+
+
+def test_review_reader_batches_nodes_and_retains_edit_evidence(monkeypatch):
+    items = [
+        review(
+            id=index,
+            node_id=f"node-{index}",
+            updated_at="2026-10-04T21:29:00Z",
+            last_edited_at="2026-10-04T21:28:00Z",
+        )
+        for index in range(101)
+    ]
+    rest = [
+        {key: value for key, value in item.items() if key not in {"updated_at", "last_edited_at"}}
+        for item in items
+    ]
+    client = flow.GitHub("owner/repo")
+    monkeypatch.setattr(client, "pages", Mock(return_value=rest))
+    run = Mock(side_effect=[review_nodes(items[:100]), review_nodes(items[100:])])
+    monkeypatch.setattr(flow.subprocess, "run", run)
+    assert client.reviews(7) == items
+    assert json.loads(run.call_args.kwargs["input"])["variables"]["ids"] == ["node-100"]
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"body": "Changed during read"},
+        {"state": "DISMISSED"},
+        {"commit_id": BASE},
+        {"submitted_at": "2026-10-04T13:00:00Z"},
+        {"updated_at": None},
+        {"node_id": "other"},
+    ],
+)
+def test_review_reader_rejects_changed_or_incomplete_edit_evidence(monkeypatch, change):
+    item = review(node_id="node-12")
+    client = flow.GitHub("owner/repo")
+    monkeypatch.setattr(client, "pages", Mock(return_value=[item]))
+    monkeypatch.setattr(
+        flow.subprocess, "run", Mock(return_value=review_nodes([{**item, **change}]))
+    )
+    with pytest.raises(ValueError):
+        client.reviews(7)
+
+
+@pytest.mark.parametrize(
+    "stdout", ['{"errors":["denied"]}', '{"data":{"nodes":[null]}}', '{"data":{"nodes":[]}}']
+)
+def test_review_reader_fails_closed_for_unavailable_nodes(monkeypatch, stdout):
+    client = flow.GitHub("owner/repo")
+    monkeypatch.setattr(client, "pages", Mock(return_value=[review(node_id="node-12")]))
+    monkeypatch.setattr(
+        flow.subprocess, "run", Mock(return_value=subprocess.CompletedProcess([], 0, stdout=stdout))
+    )
+    with pytest.raises(ValueError):
+        client.reviews(7)
+
+
+def test_review_reader_requires_node_identity_but_skips_graphql_for_no_reviews(monkeypatch):
+    client = flow.GitHub("owner/repo")
+    pages = Mock(return_value=[review()])
+    run = Mock()
+    monkeypatch.setattr(client, "pages", pages)
+    monkeypatch.setattr(flow.subprocess, "run", run)
+    with pytest.raises(ValueError, match="identities"):
+        client.reviews(7)
+    pages.return_value = []
+    assert client.reviews(7) == []
+    run.assert_not_called()
 
 
 def commit_page(start, stop, total, cursor=None):
