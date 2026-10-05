@@ -11,6 +11,7 @@ LABEL = "gitflow:auto"
 BOT_LOGIN = "chatgpt-codex-connector[bot]"
 BOT_ID = 199175422
 ACTIONS_APP = 15368
+ACTIONS_BOT_ID = 41898282
 CHECK = "ai-review"
 REQUIRED_CI = ("test", "pr-policy")
 REVIEW_ERRORS = re.compile(
@@ -56,6 +57,48 @@ class GitHub:
                 return items
         raise ValueError("Pagination limit exceeded; refusing incomplete evidence")
 
+    def reviews(self, number: int) -> list:
+        """REST authenticates reviewers; GraphQL supplies omitted edit timestamps."""
+        reviews = self.pages(f"pulls/{number}/reviews")
+        query = """query($ids:[ID!]!){nodes(ids:$ids){... on PullRequestReview{
+          id updatedAt lastEditedAt submittedAt state body commit{oid}}}}"""
+        for start in range(0, len(reviews), 100):
+            batch = reviews[start : start + 100]
+            ids = [item.get("node_id") for item in batch]
+            if not all(ids) or len(set(ids)) != len(ids):
+                raise ValueError("Formal review node identities are incomplete")
+            result = subprocess.run(
+                ["gh", "api", "graphql", "--input", "-"],
+                input=json.dumps({"query": query, "variables": {"ids": ids}}),
+                text=True,
+                capture_output=True,
+                check=True,
+                timeout=60,
+            )
+            response = json.loads(result.stdout)
+            if response.get("errors"):
+                raise ValueError("Review edit query failed; refusing incomplete evidence")
+            nodes = response["data"]["nodes"]
+            if (
+                len(nodes) != len(ids)
+                or any(not node or not node.get("updatedAt") for node in nodes)
+                or {node["id"] for node in nodes} != set(ids)
+            ):
+                raise ValueError("Formal review edit history is incomplete")
+            by_id = {node["id"]: node for node in nodes}
+            for item in batch:
+                node = by_id[item["node_id"]]
+                if (
+                    (item.get("body") or "") != node["body"]
+                    or item["state"] != node["state"]
+                    or item.get("submitted_at") != node["submittedAt"]
+                    or item.get("commit_id") != (node.get("commit") or {}).get("oid")
+                ):
+                    raise ValueError("Formal review changed while reading edit evidence")
+                item["updated_at"] = node["updatedAt"]
+                item["last_edited_at"] = node["lastEditedAt"]
+        return reviews
+
     def threads(self, number: int) -> list:
         owner, name = self.repo.split("/")
         query = """query($owner:String!,$name:String!,$number:Int!,$cursor:String){
@@ -86,29 +129,80 @@ class GitHub:
             cursor = page["pageInfo"]["endCursor"]
         raise ValueError("Review-thread pagination limit exceeded")
 
+    def commits(self, number: int) -> list:
+        """GraphQL cursor pagination avoids the REST PR endpoint's 250-commit cap."""
+        owner, name = self.repo.split("/")
+        query = """query($owner:String!,$name:String!,$number:Int!,$cursor:String){
+          repository(owner:$owner,name:$name){pullRequest(number:$number){
+            commits(first:100,after:$cursor){totalCount nodes{commit{oid}}
+              pageInfo{hasNextPage endCursor}}}}}"""
+        commits, cursors, cursor, total = [], set(), None, None
+        for _ in range(100):
+            result = subprocess.run(
+                ["gh", "api", "graphql", "--input", "-"],
+                input=json.dumps(
+                    {
+                        "query": query,
+                        "variables": {
+                            "owner": owner,
+                            "name": name,
+                            "number": number,
+                            "cursor": cursor,
+                        },
+                    }
+                ),
+                text=True,
+                capture_output=True,
+                check=True,
+                timeout=60,
+            )
+            response = json.loads(result.stdout)
+            if response.get("errors"):
+                raise ValueError("PR commit query failed; refusing incomplete evidence")
+            page = response["data"]["repository"]["pullRequest"]["commits"]
+            if total is not None and page["totalCount"] != total:
+                raise ValueError("PR commit history changed during pagination")
+            total = page["totalCount"]
+            commits.extend({"sha": node["commit"]["oid"]} for node in page["nodes"])
+            if not page["pageInfo"]["hasNextPage"]:
+                if len(commits) != total or len({item["sha"] for item in commits}) != total:
+                    raise ValueError("Incomplete or duplicated PR commit history")
+                return commits
+            cursor = page["pageInfo"]["endCursor"]
+            if not cursor or cursor in cursors:
+                raise ValueError("PR commit pagination did not advance")
+            cursors.add(cursor)
+        raise ValueError("PR commit pagination limit exceeded")
 
-def review_verdict(sha: str, reviews: list[dict], threads: list[dict]) -> tuple[bool, str]:
-    """A toggle, reaction, empty list, quota message, or stale review cannot pass."""
-    decisive_by_author = {}
-    for review in sorted(reviews, key=lambda item: item["id"]):
-        # A later comment cannot withdraw an outstanding request for changes.
-        if review["state"] in {"APPROVED", "CHANGES_REQUESTED", "DISMISSED"}:
-            decisive_by_author[review["user"]["id"]] = review
-    if any(item["state"] == "CHANGES_REQUESTED" for item in decisive_by_author.values()):
-        return False, "A reviewer requested changes"
-    if any(not thread["isResolved"] for thread in threads):
-        return False, "Unresolved review conversations remain"
-    matching = [
-        item
-        for item in reviews
-        if item["user"].get("login") == BOT_LOGIN
-        and item["user"].get("id") == BOT_ID
-        and item["user"].get("type") == "Bot"
-        and item.get("commit_id") == sha
-    ]
-    if not matching:
-        return False, f"No completed Codex review for current head {sha}"
-    review = max(matching, key=lambda item: item["id"])
+
+def is_codex(item: dict) -> bool:
+    user = item.get("user") or {}
+    return user.get("login") == BOT_LOGIN and user.get("id") == BOT_ID and user.get("type") == "Bot"
+
+
+def validate_completion_comment(sha: str, comment: dict, commits: list[dict]) -> tuple[bool, str]:
+    body = comment.get("body") or ""
+    if REVIEW_ERRORS.search(body) or re.search(r"\[P[01]\]", body):
+        return False, "Codex reported an unsuccessful or blocking review"
+    first_line = body.splitlines()[0] if body else ""
+    if not re.fullmatch(r"Codex Review: Didn't find any major issues\.(?: Swish!)?", first_line):
+        return False, "Unrecognized Codex completion comment"
+    references = re.findall(r"^\*\*Reviewed commit:\*\* `([0-9a-f]{10,40})`$", body, re.MULTILINE)
+    if len(references) != 1:
+        return False, "Codex completion must identify exactly one reviewed commit"
+    reference = references[0]
+    if len(reference) == 40:
+        matches = {reference}
+    else:
+        matches = {item["sha"] for item in commits if item["sha"].startswith(reference)}
+    if matches != {sha}:
+        return False, "Codex reviewed commit is stale, absent, or ambiguous in this PR"
+    return True, f"Codex completion comment {comment['id']} covers {sha}; no unresolved blockers"
+
+
+def validate_formal_review(sha: str, review: dict) -> tuple[bool, str]:
+    if review.get("commit_id") != sha:
+        return False, "Latest Codex formal review covers a stale commit"
     if review["state"] not in {"APPROVED", "COMMENTED"} or not review.get("submitted_at"):
         return False, "Codex review is pending, dismissed, or blocking"
     body = review.get("body") or ""
@@ -119,6 +213,72 @@ def review_verdict(sha: str, reviews: list[dict], threads: list[dict]) -> tuple[
     if review["state"] == "COMMENTED" and "codex review" not in body.lower():
         return False, "Unrecognized Codex completion; an explicit reviewed result is required"
     return True, f"Codex review {review['id']} covers {sha}; no unresolved blockers"
+
+
+def formal_review_time(review: dict) -> str:
+    return max(review["submitted_at"], review["updated_at"], review.get("last_edited_at") or "")
+
+
+def review_verdict(
+    sha: str,
+    reviews: list[dict],
+    threads: list[dict],
+    comments: list[dict] | None = None,
+    commits: list[dict] | None = None,
+) -> tuple[bool, str]:
+    """A toggle, reaction, empty list, quota message, or stale review cannot pass."""
+    decisive_by_author = {}
+    for review in sorted(reviews, key=lambda item: item["id"]):
+        # A later comment cannot withdraw an outstanding request for changes.
+        if review["state"] in {"APPROVED", "CHANGES_REQUESTED", "DISMISSED"}:
+            decisive_by_author[review["user"]["id"]] = review
+    if any(item["state"] == "CHANGES_REQUESTED" for item in decisive_by_author.values()):
+        return False, "A reviewer requested changes"
+    if any(not thread["isResolved"] for thread in threads):
+        return False, "Unresolved review conversations remain"
+    formal = [item for item in reviews if is_codex(item)]
+    candidates = [
+        item
+        for item in comments or []
+        if is_codex(item)
+        and (
+            (item.get("body") or "").startswith("Codex Review:")
+            or REVIEW_ERRORS.search(item.get("body") or "")
+        )
+    ]
+    if any(not item.get("submitted_at") or not item.get("updated_at") for item in formal):
+        return False, "Codex formal review lacks submission/edit evidence"
+    if any(not item.get("created_at") or not item.get("updated_at") for item in candidates):
+        return False, "Codex completion comment lacks submission evidence"
+    # A completion comment cannot withdraw an explicit current-head formal blocker.
+    matching = [item for item in formal if item.get("commit_id") == sha]
+    if matching:
+        latest = max(formal_review_time(item) for item in matching)
+        for review in matching:
+            if formal_review_time(review) == latest:
+                ok, reason = validate_formal_review(sha, review)
+                if not ok:
+                    return False, reason
+    # Compare all authenticated results BEFORE checking their commit. Older runs
+    # can finish late; filtering them out first would hide a newer stale result.
+    events = [(formal_review_time(item), "formal", item) for item in formal]
+    events.extend((item["updated_at"], "comment", item) for item in candidates)
+    if not events:
+        return False, f"No completed Codex review for current head {sha}"
+    latest = max(timestamp for timestamp, _, _ in events)
+    # IDs from different tables or before edits cannot resolve one-second ties.
+    # Every result in the newest second must be a completed current-head result.
+    for timestamp, kind, item in events:
+        if timestamp != latest:
+            continue
+        ok, reason = (
+            validate_formal_review(sha, item)
+            if kind == "formal"
+            else validate_completion_comment(sha, item, commits or [])
+        )
+        if not ok:
+            return False, reason
+    return ok, reason
 
 
 def ci_verdict(sha: str, checks: list[dict]) -> tuple[bool, str]:
@@ -140,8 +300,14 @@ def ci_verdict(sha: str, checks: list[dict]) -> tuple[bool, str]:
 def inspect_pr(github: GitHub, number: int) -> dict:
     pr = github.api(f"pulls/{number}")
     sha = pr["head"]["sha"]
-    reviews = github.pages(f"pulls/{number}/reviews")
-    review_ok, review_reason = review_verdict(sha, reviews, github.threads(number))
+    reviews = github.reviews(number)
+    comments = github.pages(f"issues/{number}/comments")
+    commits = github.commits(number)
+    if len(commits) != pr.get("commits", len(commits)):
+        raise ValueError("Incomplete PR commit history; refusing ambiguous review evidence")
+    review_ok, review_reason = review_verdict(
+        sha, reviews, github.threads(number), comments, commits
+    )
     checks = github.pages(f"commits/{sha}/check-runs?filter=latest", "check_runs")
     ci_ok, ci_reason = ci_verdict(sha, checks)
     policy_errors = validate_pull_request(
@@ -232,7 +398,9 @@ def ensure_ci(github: GitHub, pr: dict) -> None:
     sha = pr["head"]["sha"]
     runs = github.pages(f"actions/runs?head_sha={sha}", "workflow_runs")
     if any(
-        run["name"] == "Checks" and run["status"] in {"queued", "in_progress", "completed"}
+        run["name"] == "Checks"
+        and run["status"] in {"queued", "in_progress", "completed"}
+        and run.get("conclusion") != "action_required"
         for run in runs
     ):
         return
@@ -240,6 +408,58 @@ def ensure_ci(github: GitHub, pr: dict) -> None:
         "actions/workflows/checks.yml/dispatches",
         method="POST",
         data={"ref": pr["head"]["ref"], "inputs": {"expected_sha": sha}},
+    )
+
+
+def ensure_review(github: GitHub, evidence: dict) -> dict | None:
+    """Ask once per opted-in head for explicit, commit-bound native completion."""
+    pr, sha = evidence["pr"], evidence["head_sha"]
+    if (
+        evidence["review_ok"]
+        or evidence["policy_errors"]
+        or pr["state"] != "open"
+        or pr.get("draft")
+        or LABEL not in {label["name"] for label in pr["labels"]}
+        or (pr["head"].get("repo") or {}).get("full_name") != github.repo
+        or evidence["review_reason"]
+        in {
+            "Unresolved review conversations remain",
+            "A reviewer requested changes",
+            "Blocking findings remain in the current review summary",
+        }
+    ):
+        return None
+    marker = f"<!-- dmotion-codex-review:{sha} -->"
+    for comment in github.pages(f"issues/{pr['number']}/comments"):
+        user = comment.get("user") or {}
+        trusted = (
+            user.get("login") == "github-actions[bot]"
+            and user.get("id") == ACTIONS_BOT_ID
+            and user.get("type") == "Bot"
+        ) or (
+            user.get("type") == "User"
+            and comment.get("author_association") in {"OWNER", "MEMBER", "COLLABORATOR"}
+        )
+        body = comment.get("body") or ""
+        if trusted and body.startswith("@codex review\n") and f"`{sha}`" in body and marker in body:
+            return None
+    current = github.api(f"pulls/{pr['number']}")
+    if (
+        current["state"] != "open"
+        or current["head"]["sha"] != sha
+        or current.get("draft")
+        or LABEL not in {label["name"] for label in current["labels"]}
+    ):
+        raise NotReady("PR advanced, closed or changed opt-in before its review request")
+    return github.api(
+        f"issues/{pr['number']}/comments",
+        method="POST",
+        data={
+            "body": "@codex review\n\n"
+            f"Please review latest commit `{sha}` and include the reviewed commit in the result. "
+            "The protected merge gate requires a submitted review or explicit clean completion; "
+            "a reaction alone does not identify the reviewed commit.\n\n" + marker
+        },
     )
 
 
@@ -318,33 +538,55 @@ def create_promotion(github: GitHub, open_prs: list[dict]) -> dict | None:
     return pr
 
 
+def process_pr(github: GitHub, pr: dict) -> dict:
+    managed = LABEL in {label["name"] for label in pr["labels"]}
+    same_repo = (pr["head"].get("repo") or {}).get("full_name") == github.repo
+    if managed and not pr.get("draft") and same_repo:
+        update_base(github, pr)
+    evidence = inspect_pr(github, pr["number"])
+    publish_gate(github, evidence)
+    publish_gate(github, evidence, policy=True)
+    if managed and not pr.get("draft") and same_repo:
+        ensure_ci(github, evidence["pr"])
+        ensure_review(github, evidence)
+        if evidence["review_ok"] and evidence["ci_ok"] and not evidence["policy_errors"]:
+            result = merge_pr(github, pr["number"])
+            return {"number": pr["number"], "merged": result["sha"]}
+    return {
+        "number": pr["number"],
+        "head": evidence["head_sha"],
+        "review": evidence["review_reason"],
+    }
+
+
 def pulse(github: GitHub) -> list[dict]:
     results = []
     open_prs = github.pages("pulls?state=open")
     for pr in open_prs:
-        managed = LABEL in {label["name"] for label in pr["labels"]}
-        same_repo = (pr["head"].get("repo") or {}).get("full_name") == github.repo
-        if managed and not pr.get("draft") and same_repo:
-            update_base(github, pr)
-        evidence = inspect_pr(github, pr["number"])
-        publish_gate(github, evidence)
-        publish_gate(github, evidence, policy=True)
-        if managed and not pr.get("draft") and same_repo:
-            ensure_ci(github, evidence["pr"])
-            if evidence["review_ok"] and evidence["ci_ok"] and not evidence["policy_errors"]:
-                try:
-                    result = merge_pr(github, pr["number"])
-                    results.append({"number": pr["number"], "merged": result["sha"]})
-                except NotReady as error:
-                    results.append({"number": pr["number"], "waiting": str(error)})
-                continue
-        results.append(
-            {
-                "number": pr["number"],
-                "head": evidence["head_sha"],
-                "review": evidence["review_reason"],
-            }
-        )
+        try:
+            results.append(process_pr(github, pr))
+        except NotReady as error:
+            results.append({"number": pr["number"], "waiting": str(error)})
+        except (ValueError, subprocess.CalledProcessError, subprocess.TimeoutExpired) as error:
+            # Fail this PR closed without letting its evidence abort all other work.
+            blocked = {"number": pr["number"], "blocked": str(error)}
+            try:
+                publish_gate(
+                    github,
+                    {
+                        "pr": pr,
+                        "head_sha": pr["head"]["sha"],
+                        "review_ok": False,
+                        "review_reason": f"Evidence unavailable or incomplete: {error}",
+                    },
+                )
+            except (
+                ValueError,
+                subprocess.CalledProcessError,
+                subprocess.TimeoutExpired,
+            ) as gate_error:
+                blocked["gate_unavailable"] = str(gate_error)
+            results.append(blocked)
     created = create_promotion(github, github.pages("pulls?state=open"))
     if created:
         results.append({"created": created["html_url"]})
@@ -356,12 +598,17 @@ def main() -> int:
     parser.add_argument("--repo", required=True)
     parser.add_argument("--pr", type=int, help="Read current evidence for one PR")
     parser.add_argument("--merge", action="store_true", help="Merge only the inspected PR if ready")
+    parser.add_argument(
+        "--request-review", action="store_true", help="Request current-head review once"
+    )
     parser.add_argument("--pulse", action="store_true", help="Run trusted background orchestration")
     args = parser.parse_args()
     if args.pr and args.pulse:
         parser.error("Choose --pr or --pulse, not both")
     if args.merge and (not args.pr or args.pulse):
         parser.error("--merge requires --pr and cannot be combined with --pulse")
+    if args.request_review and (not args.pr or args.merge or args.pulse):
+        parser.error("--request-review requires --pr and cannot be combined with --merge/--pulse")
     github = GitHub(args.repo)
     if args.pulse:
         result = pulse(github)
@@ -369,6 +616,9 @@ def main() -> int:
         result = merge_pr(github, args.pr)
     elif args.pr:
         result = inspect_pr(github, args.pr)
+        if args.request_review:
+            request = ensure_review(github, result)
+            result["review_request"] = request["id"] if request else None
         result["pr"] = {key: result["pr"][key] for key in ("number", "html_url", "state")}
     else:
         parser.error("Choose --pr or --pulse")

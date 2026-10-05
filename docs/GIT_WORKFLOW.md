@@ -72,6 +72,11 @@ rerun after repairing the label.
 Rerunning after a partial failure preserves the commit and reuses an open PR.
 `make finish-feature ARGS='...'` exposes the same command.
 
+Completion requests native Codex review once for the current opted-in PR head,
+using a comment with the full SHA. Existing trusted requests for that SHA are
+deduplicated. An unavailable service or failed request is reported with the
+already-published PR preserved; it never counts as review completion.
+
 The PR records the tested commit and local check results. CI and review status
 remain pending until GitHub reports them. PR descriptions must explain the change,
 documentation updates, validation, and risks/limitations. The PR policy checks the
@@ -125,12 +130,39 @@ privileged job checks out only `main` and runs `scripts/gitflow_automation.py`.
 It never executes PR code or downloaded artifacts. PR strings are JSON data,
 never shell commands. External Actions use pinned SHAs.
 
-The workflow publishes `ai-review` on the exact head. It requires a submitted
+The workflow publishes `ai-review` on the exact head. It accepts a submitted
 `APPROVED` or recognized `COMMENTED` review from the authenticated Codex connector
 bot, matching its login, immutable user ID, type, and the current `commit_id`.
+Codex can instead post a clean completion as a PR conversation comment. Only the
+observed `Codex Review: Didn't find any major issues.` result with an explicit
+`Reviewed commit` is accepted from that same verified bot. A shortened SHA must
+uniquely identify the current head among the PR's commits; at least ten hexadecimal
+characters are required. The newest bot result must be complete and successful.
+Commit history uses GraphQL cursor pagination rather than the REST endpoint's
+250-commit limit. Incomplete, changing or excessive history fails the affected
+PR's gate; an evidence failure on one PR cannot prevent other eligible PRs from
+being inspected and processed. Such failures are recorded in the workflow output.
+Comments cannot override pending/dismissed/blocking current-head formal reviews.
+Formal reviews include GraphQL update/edit timestamps, matched by REST node identity
+and checked for changes between the two API reads; missing or inconsistent evidence
+blocks the affected PR. Formal reviews for every commit and completion comments
+are compared together by submission/edit time: a late review or an edited
+older-commit result revokes an earlier clean
+current-head result. Every result in the newest one-second timestamp must pass;
+creation IDs cannot resolve ties across reviews, comments or edits. Review and
+comment events refresh the gate; the scheduled loop also rechecks thread resolution.
 Missing, pending, dismissed, stale, unrecognized, quota-failed, or P0/P1-blocking
 results fail. Unresolved threads and outstanding requests for changes also block.
 A toggle, reaction, or connection-error comment cannot pass.
+
+Automatic clean reviews may leave only a thumbs-up on the PR. Since that reaction
+does not identify a commit, the trusted loop requests an explicit native review
+once per managed head when completion is missing or stale. The request includes
+the full SHA and a deduplication marker; only requests from the verified Actions
+bot or repository collaborators suppress duplicates. Draft, closed, fork and
+unmanaged PRs are not requested. Known blocking findings need an active agent
+to resolve them; repeated pulses do not keep requesting the same commit. Native
+account/allowance errors remain blocking and are never treated as approval.
 
 Only `gitflow:auto` PRs from this repository are updated or merged. Unlabeled
 PRs are left alone apart from reporting policy/review checks. A newer protected
@@ -146,7 +178,8 @@ ancestry, safe partial creation is resumable, and unexpected branch collisions
 fail. One managed promotion/sync PR prevents duplicates. These PRs need the same
 checks and current-head review; no tag or deployment is created.
 
-Token-created PRs can produce approval-required workflow runs. The loop explicitly
+Token-created PRs can produce approval-required workflow runs. Such runs do not
+count as executed checks or prevent the explicit dispatch. The loop explicitly
 dispatches `Checks` on the managed branch with an expected SHA; it rejects a branch
 that advanced before dispatch. Trusted policy checks are published on that head
 too. Native `allow_auto_merge` stays disabled: the loop performs freshly gated
