@@ -58,7 +58,19 @@ image:
 check:
 	.venv/bin/ruff check .
 	.venv/bin/ruff format --check .
-	.venv/bin/pytest
+	@mkdir -p reports
+	.venv/bin/bandit -r src scripts --severity-level medium -f json -o reports/bandit.json
+	.venv/bin/pytest --cov --cov-report=term:skip-covered --cov-report=xml:reports/coverage.xml --cov-report=json:reports/coverage.json --junitxml=reports/junit.xml
+
+.PHONY: audit package-check organize-media
+
+audit:
+	@mkdir -p reports
+	.venv/bin/python scripts/locked_requirements.py --output reports/locked-requirements.txt --audit
+
+package-check:
+	uv build --no-build-isolation
+	.venv/bin/python scripts/package_smoke.py --uv uv
 
 format:
 	.venv/bin/ruff check --fix .
@@ -71,3 +83,6 @@ setup-workflow:
 
 finish-feature:
 	.venv/bin/python scripts/finish_feature.py $(ARGS)
+
+organize-media:
+	.venv/bin/python scripts/organize_media.py

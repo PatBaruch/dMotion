@@ -1,6 +1,11 @@
 name: PR policy
 
 on:
+  # Only trusted default-branch code runs. Never check out or execute a PR here.
+  pull_request_target:
+    branches: [main, develop]
+    types: [opened, reopened, synchronize, edited, ready_for_review]
+  # Also validates the bootstrap PR before this workflow reaches main.
   pull_request:
     branches: [main, develop]
     types: [opened, reopened, synchronize, edited, ready_for_review]
@@ -11,9 +16,11 @@ permissions:
 jobs:
   pr-policy:
     runs-on: ubuntu-latest
+    timeout-minutes: 3
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ github.event.repository.default_branch }}
           persist-credentials: false
       - name: Validate Gitflow routing and PR documentation
         run: python3 scripts/pr_policy.py "$GITHUB_EVENT_PATH"

@@ -95,3 +95,9 @@ No publication license has been selected for this project. Ultralytics code and
 weights have their own terms; consult its [licensing page](https://www.ultralytics.com/license)
 when choosing how to distribute a future product. Other dependencies retain their
 respective licenses.
+
+## Provided media
+
+Use `make organize-media` to sort loose recordings and photos. The organizer
+records checksums and path moves without editing dataset truth or frozen training
+evidence. See [file layout](FILE_LAYOUT.md) and the [YOLOE training route](YOLOE_FINETUNING.md).

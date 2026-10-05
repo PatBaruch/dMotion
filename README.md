@@ -1,5 +1,10 @@
 # dMotion
 
+[![Checks](https://github.com/PatBaruch/dMotion/actions/workflows/checks.yml/badge.svg?branch=main)](https://github.com/PatBaruch/dMotion/actions/workflows/checks.yml)
+
+AI-assisted changes use automated tests, security checks, package verification,
+and documented pull requests. See [the reliability evidence and limits](docs/AI_RELIABILITY.md).
+
 A local laptop experiment: show cash to the webcam, get a white box around the
 banknotes, and hear an alert. Fans, stacks, and single bills count as cash.
 Python, OpenCV, Ultralytics YOLO, and Pygame.
@@ -75,14 +80,14 @@ put it at `assets/motion_detected.wav`. The clip is not bundled.
 
 ## Test a photo first
 
-Put a photo in `data/`, then run:
+Put a photo in `data/photos/`, then run:
 
 ```sh
-make image IMAGE="data/spread.jpg"
+make image IMAGE="data/photos/spread.jpg"
 # Optional preview and prompt overrides:
-.venv/bin/dmotion image data/spread.jpg --show --prompt "a fan of banknotes"
+.venv/bin/dmotion image data/photos/spread.jpg --show --prompt "a fan of banknotes"
 # Check a photo containing a person, phone, cup, bottle, or book:
-.venv/bin/dmotion image data/person.jpg --mode check --show
+.venv/bin/dmotion image data/photos/person.jpg --mode check --show
 ```
 
 The annotated copy goes into `outputs/`. The command also prints detection labels,
@@ -199,7 +204,9 @@ to save that exact frame, press `Q`, and import the newest saved photo as a
 negative example:
 
 ```sh
-latest=$(ls -t data/test-*.jpg | head -1)
+# Organize loose uploads and camera snapshots first.
+make organize-media
+latest=$(ls -t data/photos/test-*.jpg | head -1)
 .venv/bin/dmotion import "$latest" --dataset data/training --group shirt-false-positive
 .venv/bin/dmotion label --dataset data/training
 ```
@@ -232,7 +239,9 @@ config.toml        Shared defaults
 assets/            Your alert clip
 models/            Detector weights (ignored)
 weights/           Text-encoder weights (ignored)
-data/              Local testing photos and reviewed training data (ignored)
+data/videos/       Original user recordings (ignored)
+data/photos/       Original test photos and screenshots (ignored)
+data/training/     Dataset-owned frame copies and reviewed labels (ignored)
 outputs/           Annotated results (ignored)
 ```
 
@@ -255,3 +264,9 @@ excluded from version control.
 | System Python is too old | Install Python 3.11–3.13 or set `DMOTION_PYTHON=/path/to/python` for setup |
 
 Model API reference: [Ultralytics YOLO-World](https://docs.ultralytics.com/models/yolo-world/).
+
+New uploads can be placed in `data/videos/` or `data/photos/` directly.
+`make organize-media` sorts loose media from the root and `data/`, preserving
+filenames, checksums and existing labels. See [file layout](docs/FILE_LAYOUT.md).
+The [YOLOE fine-tuning note](docs/YOLOE_FINETUNING.md) explains how the existing
+reference model differs from the current custom-training model.

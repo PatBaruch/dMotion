@@ -4,6 +4,7 @@ import argparse
 import json
 import re
 import subprocess
+import sys
 import tempfile
 from pathlib import Path
 
@@ -149,10 +150,24 @@ def main() -> int:
                     document.name,
                     capture=True,
                 )
+        # Opt in only this task's PR. Existing unrelated PRs remain unmanaged.
+        run("gh", "pr", "edit", url, "--repo", repo, "--add-label", "gitflow:auto")
         print(f"\nFeature pushed: {sha}\nPull request: {url}")
+        number = str(int(url.rstrip("/").rsplit("/", 1)[-1]))
+        run(
+            sys.executable,
+            "scripts/gitflow_automation.py",
+            "--repo",
+            repo,
+            "--pr",
+            number,
+            "--request-review",
+        )
         print("CI and review are pending until GitHub reports their results.")
         print(f"Monitor CI: gh pr checks {url} --watch --interval 15 --fail-fast")
-        print("Do not merge automatically; address review findings and report remaining blockers.")
+        print("Merge only after required CI/security checks and latest-commit AI review pass.")
+        print("Missing, pending, stale, or blocking review results prevent merging.")
+        print("Trusted Gitflow automation monitors this labeled PR after deployment to main.")
         return 0
     except (ValueError, OSError, subprocess.CalledProcessError) as error:
         print(f"finish-feature stopped: {error}")

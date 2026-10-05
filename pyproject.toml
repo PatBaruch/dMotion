@@ -11,7 +11,9 @@ requires-python = ">=3.11,<3.14"
 dependencies = ["filelock>=3.19,<5"]
 
 [project.optional-dependencies]
-labeling = ["transformers>=4.57,<4.58"]
+labeling = [
+    "transformers>=5.10,<5.11",
+]
 vision = [
   "ultralytics>=8.4,<9",
   "opencv-python>=4.10,<5",
@@ -25,7 +27,15 @@ vision = [
 dmotion = "dmotion.cli:main"
 
 [dependency-groups]
-dev = ["pytest>=8,<10", "ruff>=0.11,<1"]
+dev = [
+    "bandit[toml]>=1.8,<2",
+    "hatchling>=1.27,<2",
+    "pip-audit>=2.10,<3",
+    "pytest>=8,<10",
+    "pytest-cov>=7,<8",
+    "pytest-timeout>=2.4,<3",
+    "ruff>=0.11,<1",
+]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/dmotion"]
@@ -35,7 +45,16 @@ allow-direct-references = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-q"
+addopts = "-q --timeout=60"
+
+[tool.coverage.run]
+branch = true
+source = ["dmotion", "scripts"]
+
+[tool.coverage.report]
+# Measured baseline is 68%; hardware/UI paths remain visible in reports.
+fail_under = 65
+show_missing = true
 
 [tool.ruff]
 target-version = "py311"

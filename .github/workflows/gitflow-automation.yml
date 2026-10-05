@@ -1,0 +1,48 @@
+name: Gitflow automation
+
+on:
+  # Privileged jobs execute only trusted default-branch source, never PR code.
+  pull_request_target:
+    branches: [main, develop]
+    types: [opened, reopened, synchronize, edited, ready_for_review, closed, labeled, unlabeled]
+  workflow_run:
+    workflows: [Checks, PR policy]
+    types: [completed]
+  issue_comment:
+    types: [created, edited, deleted]
+  pull_request_review:
+    types: [submitted, edited, dismissed]
+  pull_request_review_comment:
+    types: [created, edited, deleted]
+  push:
+    branches: [main, develop]
+  schedule:
+    - cron: '*/10 * * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: trusted-gitflow
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  pull-requests: write
+  checks: write
+  actions: write
+  issues: write
+
+jobs:
+  orchestrate:
+    if: github.event_name != 'issue_comment' || github.event.issue.pull_request
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+      - name: Recheck current evidence, merge opted-in PRs, and promote through PRs
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+        run: python3 scripts/gitflow_automation.py --repo "$REPOSITORY" --pulse
