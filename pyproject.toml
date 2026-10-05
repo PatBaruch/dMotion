@@ -12,7 +12,7 @@ dependencies = ["filelock>=3.19,<5"]
 
 [project.optional-dependencies]
 labeling = [
-    "transformers>=5.10,<5.11",
+    "transformers>=5.10,<5.19",
 ]
 vision = [
   "ultralytics>=8.4,<9",
