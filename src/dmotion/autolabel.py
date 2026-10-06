@@ -3,6 +3,7 @@
 import hashlib
 import logging
 import math
+import re
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -191,4 +192,14 @@ def auto_label(config: AppConfig, directory: Path, *, output: Path | None = None
     }
     report_path = output / "report.json"
     _write_json(report_path, report)
+    # Prune only after committing the report so an interrupted rebuild cannot
+    # leave the previous report referencing a deleted page.
+    current_sheets = {Path(path) for path in sheets}
+    for old_sheet in output.glob("contact-sheet-*.jpg"):
+        if (
+            old_sheet not in current_sheets
+            and re.fullmatch(r"contact-sheet-[0-9]{2,}\.jpg", old_sheet.name)
+            and old_sheet.is_file()
+        ):
+            old_sheet.unlink()
     return report_path
