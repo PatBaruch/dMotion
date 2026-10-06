@@ -137,7 +137,7 @@ Codex can instead post a clean completion as a PR conversation comment. Only the
 observed `Codex Review: Didn't find any major issues.` result with an explicit
 `Reviewed commit` is accepted from that same verified bot.
 The clean-result sentence must start the first line exactly. Only these observed
-decorative closings are allowed after it: `Swish!`, `:tada:`,
+decorative closings are allowed after it: `Swish!`, `:tada:`, `Keep it up!`,
 `Already looking forward to the next diff.`, or `What shall we delve into next?`.
 Unknown endings fail closed because they could qualify an incomplete review.
 Failed-review messages and P0/P1 findings anywhere in the comment still block completion.
