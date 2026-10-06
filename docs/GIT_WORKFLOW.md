@@ -140,6 +140,9 @@ The clean-result sentence must start the first line exactly. Only these observed
 decorative closings are allowed after it: `Swish!`, `:tada:`, `Keep it up!`,
 `Already looking forward to the next diff.`, or `What shall we delve into next?`.
 Unknown endings fail closed because they could qualify an incomplete review.
+The rest of the message must contain only the reviewed-commit marker and an
+optional observed native About Codex footer. Additional text anywhere in the
+body or footer fails closed; footer whitespace variations are accepted.
 Failed-review messages and P0/P1 findings anywhere in the comment still block completion.
 A shortened SHA must
 uniquely identify the current head among the PR's commits; at least ten hexadecimal

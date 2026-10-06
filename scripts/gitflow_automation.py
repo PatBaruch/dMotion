@@ -23,6 +23,18 @@ REVIEW_ERRORS = re.compile(
 )
 
 
+# Whitespace varies in native comments; footer content is fixed and cannot
+# carry additional review qualifications.
+COMPLETION_FOOTER = " ".join(
+    """<details> <summary>ℹ️ About Codex in GitHub</summary> <br/> [Your team has set up Codex
+to review pull requests in this repo](https://chatgpt.com/codex/cloud/settings/general).
+Reviews are triggered when you - Open a pull request for review - Mark a draft as ready
+- Comment "@codex review". If Codex has suggestions, it will comment; otherwise it will
+react with 👍. Codex can also answer questions or update the PR. Try commenting "@codex
+address that feedback". </details>""".split()
+)
+
+
 class GitHub:
     """Use gh's existing authentication without exposing or copying credentials."""
 
@@ -198,6 +210,12 @@ def validate_completion_comment(sha: str, comment: dict, commits: list[dict]) ->
     if len(references) != 1:
         return False, "Codex completion must identify exactly one reviewed commit"
     reference = references[0]
+    remainder = "\n".join(body.splitlines()[1:]).strip()
+    commit_line, _, footer = remainder.partition("\n")
+    if commit_line != f"**Reviewed commit:** `{reference}`" or (
+        footer.strip() and " ".join(footer.split()) != COMPLETION_FOOTER
+    ):
+        return False, "Unrecognized Codex completion body or footer"
     if len(reference) == 40:
         matches = {reference}
     else:

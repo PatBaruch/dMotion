@@ -4,6 +4,7 @@ import copy
 import json
 import subprocess
 import sys
+from pathlib import Path
 from unittest.mock import Mock
 
 import pytest
@@ -160,7 +161,7 @@ def completion(**changes):
         "created_at": "2026-10-04T21:28:27Z",
         "updated_at": "2026-10-04T21:28:27Z",
         "body": f"Codex Review: Didn't find any major issues. Swish!\n\n"
-        f"**Reviewed commit:** `{SHA[:10]}`\n\n<details>About Codex</details>",
+        f"**Reviewed commit:** `{SHA[:10]}`\n",
         **changes,
     }
 
@@ -219,6 +220,37 @@ def test_clean_result_requires_exact_sentence_and_suffix_boundary(first_line):
         "Codex Review: Didn't find any major issues. Swish!", first_line
     )
     assert not flow.review_verdict(SHA, [], [], [completion(body=body)], [{"sha": SHA}])[0]
+
+
+@pytest.mark.parametrize(
+    "extra",
+    ["Review ended early", "I did not finish checking the diff", "Unknown qualification"],
+)
+@pytest.mark.parametrize("position", ["before_commit", "after_commit", "inside_footer"])
+def test_unknown_qualifications_anywhere_in_completion_body_block(extra, position):
+    body = completion()["body"]
+    if position == "before_commit":
+        body = body.replace("**Reviewed commit:**", extra + "\n**Reviewed commit:**")
+    elif position == "after_commit":
+        body += "\n" + extra
+    else:
+        body += "\n<details>" + extra + "</details>"
+    assert not flow.review_verdict(SHA, [], [], [completion(body=body)], [{"sha": SHA}])[0]
+
+
+def test_observed_native_footer_allows_whitespace_variation_but_no_added_qualifiers():
+    fixture = Path(__file__).parent / "fixtures" / "codex_clean_completion.json"
+    body = json.loads(fixture.read_text())["body"].replace("e252966840", SHA[:10])
+    commits = [{"sha": SHA}]
+    assert flow.review_verdict(SHA, [], [], [completion(body=body)], commits)[0]
+    compact = body[: body.index("<details>")] + " ".join(body[body.index("<details>") :].split())
+    assert flow.review_verdict(SHA, [], [], [completion(body=compact)], commits)[0]
+    for altered in (
+        body.replace("<br/>", "<br/> Review ended early"),
+        body + "\nI did not finish checking the diff",
+        "Review ended early\n" + body,
+    ):
+        assert not flow.review_verdict(SHA, [], [], [completion(body=altered)], commits)[0]
 
 
 def test_incomplete_commit_history_blocks_inspection_before_merge():
