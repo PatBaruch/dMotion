@@ -68,3 +68,13 @@ An explicit user instruction to keep work local, pause, or skip publication wins
 
 See `docs/AI_RELIABILITY.md` for gate thresholds, retained evidence, and the
 separate requirements for model evaluation, hardware acceptance, and delivery.
+
+## Independent review completion format
+
+When independently reviewing this repository, report findings normally. Only
+when the review is actually complete and clean, post a standalone result using
+`docs/schemas/codex-review-result.schema.json` and the schema v1 example in
+`docs/GIT_WORKFLOW.md`. Include the full reviewed commit SHA; do not add a
+closing sentence or prose to the JSON result. The native About Codex footer is
+optional. Incomplete/failed reviews must never claim completed/clean.
+Implementation agents must not author or impersonate independent bot results.

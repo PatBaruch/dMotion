@@ -4,6 +4,7 @@ import copy
 import json
 import subprocess
 import sys
+from pathlib import Path
 from unittest.mock import Mock
 
 import pytest
@@ -22,7 +23,9 @@ def review(**changes):
         "state": "COMMENTED",
         "submitted_at": "2026-10-04T12:00:00Z",
         "updated_at": changes.get("submitted_at", "2026-10-04T12:00:00Z"),
-        "body": "Codex Review: no blocking findings.",
+        "body": json.loads(
+            (Path(__file__).parent / "fixtures/codex_formal_review.json").read_text()
+        )["body"].replace("3985630a63", SHA[:10]),
         **changes,
     }
 
@@ -160,19 +163,287 @@ def completion(**changes):
         "created_at": "2026-10-04T21:28:27Z",
         "updated_at": "2026-10-04T21:28:27Z",
         "body": f"Codex Review: Didn't find any major issues. Swish!\n\n"
-        f"**Reviewed commit:** `{SHA[:10]}`\n\n<details>About Codex</details>",
+        f"**Reviewed commit:** `{SHA[:10]}`\n",
         **changes,
     }
 
 
-def test_native_clean_comment_binds_unambiguous_pr_commit_and_reaches_merge_gate():
+@pytest.mark.parametrize(
+    "suffix",
+    [
+        "",
+        " Swish!",
+        " :tada:",
+        " Keep it up!",
+        " You're on a roll.",
+        " Already looking forward to the next diff.",
+        " What shall we delve into next?",
+        " Another round soon, please!",
+        " Chef's kiss.",
+    ],
+)
+def test_native_clean_comment_binds_unambiguous_pr_commit_and_reaches_merge_gate(suffix):
     commits = [{"sha": SHA}, {"sha": BASE}]
-    assert flow.review_verdict(SHA, [], [], [completion()], commits)[0]
+    comment = completion(body=completion()["body"].replace(" Swish!", suffix))
+    assert flow.review_verdict(SHA, [], [], [comment], commits)[0]
     client = inspection_client()
     client.routes["GET", "pulls/7/reviews"] = []
-    client.routes["GET", "issues/7/comments"] = [completion()]
+    client.routes["GET", "issues/7/comments"] = [comment]
     assert flow.inspect_pr(client, 7)["review_ok"]
     assert flow.merge_pr(client, 7)["merged"]
+
+
+@pytest.mark.parametrize(
+    "suffix",
+    [
+        "[P1] Fix this",
+        " [P0] Fix this",
+        " Review was not completed",
+        " quota exhausted",
+        " Review ended early",
+        " I did not finish checking the diff",
+        " Unknown closing.",
+        " Already looking forward to the next diff. Review ended early",
+    ],
+)
+def test_clean_prefix_with_unsuccessful_or_blocking_suffix_cannot_pass(suffix):
+    comment = completion(body=completion()["body"].replace(" Swish!", suffix))
+    assert not flow.review_verdict(SHA, [], [], [comment], [{"sha": SHA}])[0]
+
+
+@pytest.mark.parametrize(
+    "first_line",
+    [
+        "Quoted: Codex Review: Didn't find any major issues.",
+        "> Codex Review: Didn't find any major issues.",
+        "Codex Review: Didn't find any major issues",
+        "Codex Review: Didn't find any major issues.Swish!",
+    ],
+)
+def test_clean_result_requires_exact_sentence_and_suffix_boundary(first_line):
+    body = completion()["body"].replace(
+        "Codex Review: Didn't find any major issues. Swish!", first_line
+    )
+    assert not flow.review_verdict(SHA, [], [], [completion(body=body)], [{"sha": SHA}])[0]
+
+
+@pytest.mark.parametrize(
+    "extra",
+    ["Review ended early", "I did not finish checking the diff", "Unknown qualification"],
+)
+@pytest.mark.parametrize("position", ["before_commit", "after_commit", "inside_footer"])
+def test_unknown_qualifications_anywhere_in_completion_body_block(extra, position):
+    body = completion()["body"]
+    if position == "before_commit":
+        body = body.replace("**Reviewed commit:**", extra + "\n**Reviewed commit:**")
+    elif position == "after_commit":
+        body += "\n" + extra
+    else:
+        body += "\n<details>" + extra + "</details>"
+    assert not flow.review_verdict(SHA, [], [], [completion(body=body)], [{"sha": SHA}])[0]
+
+
+def test_observed_native_footer_allows_whitespace_variation_but_no_added_qualifiers():
+    fixture = Path(__file__).parent / "fixtures" / "codex_clean_completion.json"
+    body = json.loads(fixture.read_text())["body"].replace("e252966840", SHA[:10])
+    commits = [{"sha": SHA}]
+    assert flow.review_verdict(SHA, [], [], [completion(body=body)], commits)[0]
+    compact = body[: body.index("<details>")] + " ".join(body[body.index("<details>") :].split())
+    assert flow.review_verdict(SHA, [], [], [completion(body=compact)], commits)[0]
+    for altered in (
+        body.replace("<br/>", "<br/> Review ended early"),
+        body + "\nI did not finish checking the diff",
+        "Review ended early\n" + body,
+    ):
+        assert not flow.review_verdict(SHA, [], [], [completion(body=altered)], commits)[0]
+
+
+@pytest.mark.parametrize("footer", ["", "\n\n" + flow.COMPLETION_FOOTER])
+def test_schema_v1_comment_and_formal_review_reach_merge_gate(footer):
+    body = flow.review_result_message(SHA) + footer
+    comment = completion(body=body)
+    assert flow.review_verdict(SHA, [], [], [comment], [{"sha": SHA}])[0]
+    assert flow.review_verdict(SHA, [review(body=body)], [])[0]
+    client = inspection_client()
+    client.routes["GET", "pulls/7/reviews"] = []
+    client.routes["GET", "issues/7/comments"] = [comment]
+    assert flow.inspect_pr(client, 7)["review_ok"]
+    assert flow.merge_pr(client, 7)["merged"]
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"schema_version": 2},
+        {"schema_version": True},
+        {"reviewed_commit": BASE},
+        {"reviewed_commit": SHA[:10]},
+        {"reviewed_commit": SHA.upper()},
+        {"status": "incomplete"},
+        {"status": "failed"},
+        {"status": "unknown"},
+        {"conclusion": "findings"},
+        {"conclusion": "unavailable"},
+        {"blocking_findings": 1},
+        {"blocking_findings": -1},
+        {"blocking_findings": False},
+        {"blocking_findings": 0.0},
+        {"extra": "Review ended early"},
+    ],
+)
+def test_schema_v1_wrong_types_versions_commit_or_result_cannot_pass(change):
+    payload = json.loads(flow.review_result_message(SHA).split("```json\n")[1].split("\n```")[0])
+    payload.update(change)
+    body = flow.RESULT_MARKER + "\n```json\n" + json.dumps(payload) + "\n```"
+    assert not flow.review_verdict(SHA, [], [], [completion(body=body)], [{"sha": SHA}])[0]
+
+
+@pytest.mark.parametrize(
+    "transform",
+    [
+        lambda body: body.replace('"schema_version": 1,', ""),
+        lambda body: body.replace(
+            '"schema_version": 1,', '"schema_version": 1, "schema_version": 1,'
+        ),
+        lambda body: body.replace('"schema_version": 1,', '"schema_version": NaN,'),
+        lambda body: body.replace("```json", "```"),
+        lambda body: body.replace("result:v1", "result:v2"),
+        lambda body: body.replace("{", "[{", 1).replace("}", "}]", 1),
+        lambda body: body + "\nReview ended early",
+        lambda body: body + "\nKeep it up!",
+        lambda body: (
+            body + "\n" + flow.COMPLETION_FOOTER.replace("<br/>", "<br/> Review ended early")
+        ),
+        lambda body: body + "\n" + body,
+    ],
+)
+def test_malformed_duplicate_or_qualified_schema_result_revokes_previous_clean_result(transform):
+    newer = completion(
+        id=42,
+        body=transform(flow.review_result_message(SHA)),
+        updated_at="2026-10-04T21:30:00Z",
+    )
+    assert not flow.review_verdict(SHA, [], [], [completion(), newer], [{"sha": SHA}])[0]
+
+
+def test_schema_comment_keeps_bot_identity_formal_blockers_threads_and_event_order():
+    body = flow.review_result_message(SHA)
+    clean = completion(body=body)
+    for change in (
+        {"user": {"login": flow.BOT_LOGIN, "id": 1, "type": "Bot"}},
+        {"user": {"login": "other", "id": flow.BOT_ID, "type": "Bot"}},
+        {"user": {"login": flow.BOT_LOGIN, "id": flow.BOT_ID, "type": "User"}},
+        {"updated_at": None},
+    ):
+        assert not flow.review_verdict(SHA, [], [], [completion(body=body, **change)])[0]
+    assert not flow.review_verdict(SHA, [], [{"isResolved": False}], [clean])[0]
+    assert not flow.review_verdict(SHA, [review(state="CHANGES_REQUESTED")], [], [clean])[0]
+    assert not flow.review_verdict(SHA, [review(state="PENDING")], [], [clean])[0]
+    newer = completion(body=flow.review_result_message(BASE), updated_at="2026-10-04T21:30:00Z")
+    assert not flow.review_verdict(SHA, [], [], [clean, newer])[0]
+
+
+@pytest.mark.parametrize("prefix", ["\n ", "Note: ", "> ", "Quoted response:\n"])
+@pytest.mark.parametrize("status", ["incomplete", "failed"])
+def test_prefixed_newer_unsuccessful_schema_result_revokes_older_clean_result(prefix, status):
+    body = flow.review_result_message(SHA).replace('"completed"', json.dumps(status))
+    body = body.replace('"clean"', '"unavailable"')
+    newer = completion(body=prefix + body, updated_at="2026-10-04T21:30:00Z")
+    assert not flow.review_verdict(SHA, [], [], [completion(), newer], [{"sha": SHA}])[0]
+
+
+@pytest.mark.parametrize("prefix", ["Note: ", "> ", "Quoted response:\n"])
+def test_extra_prose_before_even_clean_schema_is_rejected_as_newest_event(prefix):
+    body = prefix + flow.review_result_message(SHA)
+    newer = completion(body=body, updated_at="2026-10-04T21:30:00Z")
+    assert not flow.review_verdict(SHA, [], [], [completion(), newer], [{"sha": SHA}])[0]
+    assert not flow.review_verdict(SHA, [review(body=body)], [])[0]
+
+
+def test_whitespace_around_complete_schema_does_not_change_its_result():
+    body = "\n " + flow.review_result_message(SHA) + "\n "
+    assert flow.review_verdict(SHA, [], [], [completion(body=body)])[0]
+
+
+@pytest.mark.parametrize("status", ["completed", "incomplete", "failed"])
+@pytest.mark.parametrize("prefix", ["", "Note: ", "> "])
+def test_markerless_schema_result_is_decisive_and_rejected(status, prefix):
+    body = flow.review_result_message(SHA).split("\n", 1)[1]
+    body = body.replace('"completed"', json.dumps(status))
+    newer = completion(body=prefix + body, updated_at="2026-10-04T21:30:00Z")
+    assert not flow.review_verdict(SHA, [], [], [completion(), newer], [{"sha": SHA}])[0]
+    assert not flow.review_verdict(SHA, [review(body="Codex Review\n" + body)], [])[0]
+
+
+@pytest.mark.parametrize("body", ["", "Unknown format", "Review ended early", "```json\n{}\n```"])
+def test_newer_unknown_bot_comment_revokes_old_result(body):
+    newer = completion(body=body, updated_at="2026-10-04T21:30:00Z")
+    assert not flow.review_verdict(SHA, [], [], [completion(), newer], [{"sha": SHA}])[0]
+
+
+def test_native_activity_table_is_the_only_nondecisive_bot_comment():
+    activity = completion(
+        body=json.loads(
+            (Path(__file__).parent / "fixtures/codex_activity_summary.json").read_text()
+        )["body"],
+        updated_at="2026-10-04T21:30:00Z",
+    )
+    assert flow.review_verdict(SHA, [], [], [completion(), activity], [{"sha": SHA}])[0]
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        flow.ACTIVITY_MARKER + "\nReview ended early",
+        flow.ACTIVITY_MARKER + "\n" + flow.review_result_message(SHA),
+        flow.ACTIVITY_MARKER + '\n```json\n{"status":"failed"}\n```',
+    ],
+)
+def test_activity_marker_cannot_hide_malformed_or_failed_review_result(body):
+    newer = completion(body=body, updated_at="2026-10-04T21:30:00Z")
+    assert not flow.review_verdict(SHA, [], [], [completion(), newer], [{"sha": SHA}])[0]
+
+
+@pytest.mark.parametrize("payload", ["{}", "{", "[]"])
+@pytest.mark.parametrize("fence", ["```json", "```JSON", "```Json", "~~~JSON", "```", ""])
+@pytest.mark.parametrize("state", ["COMMENTED", "APPROVED"])
+def test_malformed_markerless_json_formal_body_cannot_use_legacy_review_header(
+    payload, fence, state
+):
+    body = "Codex Review\n" + fence + "\n" + payload + "\n```"
+    assert not flow.review_verdict(SHA, [review(body=body, state=state)], [])[0]
+
+
+@pytest.mark.parametrize(
+    "transform",
+    [
+        lambda body: body + "\nReview ended early",
+        lambda body: body.replace("</details>", "I did not finish checking the diff\n</details>"),
+        lambda body: body.replace(SHA[:10], BASE[:10]),
+        lambda body: "Codex Review: no blocking findings.",
+        lambda body: "Codex Review: I did not finish checking the diff",
+    ],
+)
+def test_formal_review_requires_the_whole_native_envelope(transform):
+    body = transform(review()["body"])
+    assert not flow.review_verdict(SHA, [review(body=body)], [])[0]
+
+
+def test_request_response_schema_round_trip_and_old_request_does_not_suppress_upgrade():
+    client = inspection_client()
+    evidence = request_evidence(client)
+    old = "@codex review\nPlease review `" + SHA + "`\n<!-- dmotion-codex-review:" + SHA + " -->"
+    client.routes["GET", "issues/7/comments"] = [
+        {"body": old, "user": {"id": 123, "type": "User"}, "author_association": "OWNER"}
+    ]
+    assert flow.ensure_review(client, evidence)["id"] == 42
+    request = client.calls[-1][2]["body"]
+    start = request.index(flow.RESULT_MARKER)
+    content = request.index("```json\n", start) + len("```json\n")
+    end = request.index("\n```", content) + len("\n```")
+    response = request[start:end]
+    assert flow.validate_completion_comment(SHA, completion(body=response), [{"sha": SHA}])[0]
+    assert flow.REQUEST_SCHEMA_MARKER in request
 
 
 def test_incomplete_commit_history_blocks_inspection_before_merge():
