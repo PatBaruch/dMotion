@@ -185,9 +185,14 @@ def validate_completion_comment(sha: str, comment: dict, commits: list[dict]) ->
     if REVIEW_ERRORS.search(body) or re.search(r"\[P[01]\]", body):
         return False, "Codex reported an unsuccessful or blocking review"
     first_line = body.splitlines()[0] if body else ""
-    # The native bot varies its closing sentence; identity, SHA and blockers
-    # are checked separately. Require the exact clean-result prefix boundary.
-    if not re.fullmatch(r"Codex Review: Didn't find any major issues\.(?:[ \t].*)?", first_line):
+    # Only observed decorative closings may follow the clean result. Unknown
+    # text could retract completion in a way REVIEW_ERRORS does not recognize.
+    if not re.fullmatch(
+        r"Codex Review: Didn't find any major issues\."
+        r"(?: (?:Swish!|Already looking forward to the next diff\.|"
+        r"What shall we delve into next\?))?",
+        first_line,
+    ):
         return False, "Unrecognized Codex completion comment"
     references = re.findall(r"^\*\*Reviewed commit:\*\* `([0-9a-f]{10,40})`$", body, re.MULTILINE)
     if len(references) != 1:

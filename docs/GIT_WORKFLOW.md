@@ -136,9 +136,11 @@ bot, matching its login, immutable user ID, type, and the current `commit_id`.
 Codex can instead post a clean completion as a PR conversation comment. Only the
 observed `Codex Review: Didn't find any major issues.` result with an explicit
 `Reviewed commit` is accepted from that same verified bot.
-The clean-result sentence must start the first line exactly; optional trailing
-text such as `Already looking forward to the next diff.` is allowed. Failed-review
-messages and P0/P1 findings anywhere in the comment still block completion.
+The clean-result sentence must start the first line exactly. Only these observed
+decorative closings are allowed after it: `Swish!`,
+`Already looking forward to the next diff.`, or `What shall we delve into next?`.
+Unknown endings fail closed because they could qualify an incomplete review.
+Failed-review messages and P0/P1 findings anywhere in the comment still block completion.
 A shortened SHA must
 uniquely identify the current head among the PR's commits; at least ten hexadecimal
 characters are required. The newest bot result must be complete and successful.
