@@ -82,31 +82,38 @@ def _contact_sheets(dataset: Dataset, records: list[dict], output: Path) -> list
 def auto_label(config: AppConfig, directory: Path, *, output: Path | None = None) -> Path:
     """Persist model suggestions without accepting any positives or negatives."""
     dataset = Dataset(directory)
-    pending = [
-        record
-        for record in dataset.records()
-        if record["status"] == "unreviewed" and "suggestion" not in record
-    ]
-    if not pending:
+    unreviewed = [record for record in dataset.records() if record["status"] == "unreviewed"]
+    if not unreviewed:
         raise ValueError("No unreviewed pictures. Import your videos before auto-labeling.")
+    records = [record for record in unreviewed if "suggestion" in record]
+    pending = [record for record in unreviewed if "suggestion" not in record]
+    preserved_frames = len(records)
     output = config.resolve("outputs/video-autolabel") if output is None else Path(output).resolve()
     if output.is_relative_to(dataset.directory) or dataset.directory.is_relative_to(output):
         raise ValueError("Auto-label output must be separate from the source dataset")
     output.mkdir(parents=True, exist_ok=True)
     created = datetime.now(UTC).isoformat()
-    import cv2
-
+    for record in records:
+        source = dataset.image_path(record)
+        if hashlib.sha256(source.read_bytes()).hexdigest() != record["sha256"]:
+            raise ValueError(f"Image changed since import: {source.name}")
+    # Restore the audit artifact even if the previous run stopped after its last save.
+    _write_json(output / "predictions.json", {"version": 1, "records": records})
     model = config.resolve(config.detector.model)
-    if not model.is_file():
-        raise ValueError(
-            "Supply a trained YOLO26m cash checkpoint with --model before auto-labeling"
-        )
-    with model.open("rb") as checkpoint:
-        model_digest = hashlib.file_digest(checkpoint, "sha256").hexdigest()
-    detector = MoneyDetector(config)
-    records = []
-    logger.info("Suggesting cash boxes for %s pictures on %s", len(pending), detector.device)
-    revision = f"sha256:{model_digest}"
+    model_digest = revision = device = None
+    if pending:
+        import cv2
+
+        if not model.is_file():
+            raise ValueError(
+                "Supply a trained YOLO26m cash checkpoint with --model before auto-labeling"
+            )
+        with model.open("rb") as checkpoint:
+            model_digest = hashlib.file_digest(checkpoint, "sha256").hexdigest()
+        detector = MoneyDetector(config)
+        device = detector.device
+        revision = f"sha256:{model_digest}"
+        logger.info("Suggesting cash boxes for %s pictures on %s", len(pending), device)
     for index, record in enumerate(pending, start=1):
         source = dataset.image_path(record)
         if hashlib.sha256(source.read_bytes()).hexdigest() != record["sha256"]:
@@ -142,21 +149,39 @@ def auto_label(config: AppConfig, directory: Path, *, output: Path | None = None
             "%s/%s: %s — %s proposed boxes", index, len(pending), record["source"], len(boxes)
         )
     sheets = _contact_sheets(dataset, records, output)
+    identities = dict.fromkeys(
+        (
+            item["suggestion"].get("model"),
+            item["suggestion"].get("model_sha256"),
+            item["suggestion"].get("model_revision"),
+        )
+        for item in records
+    )
     report = {
         "version": 1,
         "created_at": created,
         "dataset": str(dataset.directory),
-        "engine": "yolo26m",
-        "model": str(model),
+        "engine": "yolo26m" if pending else "saved-drafts",
+        # These fields describe this invocation; each saved draft retains its identity.
+        "model": str(model) if pending else None,
         "model_sha256": model_digest,
         "model_revision": revision,
-        "device": detector.device,
+        "device": device,
+        "new_frames": len(pending),
+        "preserved_frames": preserved_frames,
+        "models": [
+            {"model": name, "model_sha256": sha, "model_revision": rev}
+            for name, sha, rev in identities
+        ],
         "confidence_threshold": config.detector.confidence,
         "image_size": config.detector.image_size,
         "frames": len(records),
         "frames_with_boxes": sum(bool(record["suggestion"]["boxes"]) for record in records),
         "boxes": sum(len(record["suggestion"]["boxes"]) for record in records),
-        "raw_boxes": sum(record["suggestion"]["raw_box_count"] for record in records),
+        "raw_boxes": sum(
+            record["suggestion"].get("raw_box_count", len(record["suggestion"]["boxes"]))
+            for record in records
+        ),
         "overlap_threshold": 0.5,
         "videos": sorted({record["source"].split(", ")[0] for record in records}),
         "contact_sheets": sheets,

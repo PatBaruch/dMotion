@@ -184,7 +184,8 @@ make label
 
 Suggestions remain drafts, including frames with no detections. Review missed
 cash as well as incorrect boxes. Existing reviewed records and pending drafts
-are preserved. Reports and contact sheets go to `outputs/video-autolabel/`.
+are preserved. Rerunning after interruption rebuilds the complete report and
+contact sheets from saved drafts without repeating their inference. Reports and contact sheets go to `outputs/video-autolabel/`.
 No separate labeling model or text encoder is required. Training refuses pending
 AI suggestions until you explicitly choose cash, no cash, or skip.
 
