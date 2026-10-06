@@ -202,3 +202,65 @@ def test_interrupted_labeling_resumes_complete_audit_without_replacing_drafts(
     assert all(dataset.get_record(key)["suggestion"] == value for key, value in saved.items())
     if stage == "before_report":
         assert calls.count("load") == 1
+
+
+@pytest.mark.parametrize("render_fails", [False, True])
+def test_saved_draft_rebuild_removes_obsolete_pages_only_after_successful_render(
+    tmp_path, monkeypatch, render_fails
+):
+    dataset = Dataset(tmp_path / "dataset")
+    for index in range(13):
+        image = tmp_path / f"frame-{index}.jpg"
+        image.write_bytes(f"image {index}".encode())
+        record = dataset.add_image(image, group="session", width=100, height=80)
+        dataset.suggest(
+            record["id"],
+            {
+                "boxes": [],
+                "scores": [],
+                "labels": [],
+                "model": "saved-cash-model",
+                "created_at": "2026-10-06T00:00:00+00:00",
+                "prompts": ["cash"],
+            },
+        )
+
+    def render(dataset, records, output):
+        paths = []
+        for page, offset in enumerate(range(0, len(records), 12), start=1):
+            path = output / f"contact-sheet-{page:02}.jpg"
+            path.write_text("\n".join(record["id"] for record in records[offset : offset + 12]))
+            paths.append(str(path))
+        return paths
+
+    monkeypatch.setitem(sys.modules, "cv2", None)
+    monkeypatch.setattr("dmotion.autolabel._contact_sheets", render)
+    config = AppConfig(root=tmp_path)
+    report = auto_label(config, dataset.directory)
+    output = report.parent
+    obsolete = output / "contact-sheet-02.jpg"
+    assert obsolete.is_file()
+    notes = output / "contact-sheet-notes.jpg"
+    notes.write_bytes(b"user notes")
+    reviewed = dataset.records()[:2]
+    for record in reviewed:
+        dataset.review(record["id"], status="negative", boxes=[])
+    manifest = dataset.manifest_path.read_bytes()
+    if render_fails:
+
+        def fail(*args):
+            raise RuntimeError("render interrupted")
+
+        monkeypatch.setattr("dmotion.autolabel._contact_sheets", fail)
+        with pytest.raises(RuntimeError, match="render interrupted"):
+            auto_label(config, dataset.directory)
+        assert obsolete.is_file()
+    else:
+        summary = json.loads(auto_label(config, dataset.directory).read_text())
+        assert summary["frames"] == summary["preserved_frames"] == 11
+        assert summary["contact_sheets"] == [str(output / "contact-sheet-01.jpg")]
+        assert not obsolete.exists()
+        sheet = (output / "contact-sheet-01.jpg").read_text()
+        assert all(record["id"] not in sheet for record in reviewed)
+    assert notes.read_bytes() == b"user notes"
+    assert dataset.manifest_path.read_bytes() == manifest

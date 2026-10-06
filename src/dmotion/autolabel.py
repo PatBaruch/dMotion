@@ -3,6 +3,7 @@
 import hashlib
 import logging
 import math
+import re
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -149,6 +150,16 @@ def auto_label(config: AppConfig, directory: Path, *, output: Path | None = None
             "%s/%s: %s — %s proposed boxes", index, len(pending), record["source"], len(boxes)
         )
     sheets = _contact_sheets(dataset, records, output)
+    # Remove obsolete generated pages only after the new set renders successfully.
+    # Partial human review can reduce the page count between saved-draft rebuilds.
+    current_sheets = {Path(path) for path in sheets}
+    for old_sheet in output.glob("contact-sheet-*.jpg"):
+        if (
+            old_sheet not in current_sheets
+            and re.fullmatch(r"contact-sheet-[0-9]{2,}\.jpg", old_sheet.name)
+            and old_sheet.is_file()
+        ):
+            old_sheet.unlink()
     identities = dict.fromkeys(
         (
             item["suggestion"].get("model"),
