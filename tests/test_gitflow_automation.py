@@ -402,6 +402,12 @@ def test_activity_marker_cannot_hide_malformed_or_failed_review_result(body):
     assert not flow.review_verdict(SHA, [], [], [completion(), newer], [{"sha": SHA}])[0]
 
 
+@pytest.mark.parametrize("payload", ["{}", "{", "[]"])
+def test_malformed_markerless_json_formal_body_cannot_use_legacy_review_header(payload):
+    body = "Codex Review\n```json\n" + payload + "\n```"
+    assert not flow.review_verdict(SHA, [review(body=body)], [])[0]
+
+
 def test_request_response_schema_round_trip_and_old_request_does_not_suppress_upgrade():
     client = inspection_client()
     evidence = request_evidence(client)

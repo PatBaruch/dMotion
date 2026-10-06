@@ -263,9 +263,14 @@ def is_activity_comment(body: str) -> bool:
 
 
 def is_schema_result(body: str) -> bool:
-    return "<!-- dmotion-review-result:" in body or bool(
-        re.search(
-            r'"(?:schema_version|reviewed_commit|status|conclusion|blocking_findings)"\s*:', body
+    return (
+        "<!-- dmotion-review-result:" in body
+        or "```json" in body
+        or bool(
+            re.search(
+                r'"(?:schema_version|reviewed_commit|status|conclusion|blocking_findings)"\s*:',
+                body,
+            )
         )
     )
 
