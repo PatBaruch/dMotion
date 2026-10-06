@@ -4,6 +4,7 @@ import argparse
 import json
 import re
 import subprocess
+from pathlib import Path
 
 from pr_policy import validate_pull_request
 
@@ -20,6 +21,15 @@ REVIEW_ERRORS = re.compile(
     r"(?:something went wrong|review (?:was )?not (?:completed|performed)|"
     r"connect (?:your account|to github)|create a codex account)",
     re.IGNORECASE,
+)
+
+
+RESULT_MARKER = "<!-- dmotion-review-result:v1 -->"
+REQUEST_SCHEMA_MARKER = "<!-- dmotion-review-schema:v1 -->"
+REVIEW_SCHEMA = json.loads(
+    (
+        Path(__file__).resolve().parents[1] / "docs/schemas/codex-review-result.schema.json"
+    ).read_text()
 )
 
 
@@ -192,17 +202,77 @@ def is_codex(item: dict) -> bool:
     return user.get("login") == BOT_LOGIN and user.get("id") == BOT_ID and user.get("type") == "Bot"
 
 
+def review_result_message(sha: str) -> str:
+    """The request example and parser share a versioned wire contract."""
+    result = {
+        "schema_version": 1,
+        "reviewed_commit": sha,
+        "status": "completed",
+        "conclusion": "clean",
+        "blocking_findings": 0,
+    }
+    return RESULT_MARKER + "\n```json\n" + json.dumps(result, indent=2) + "\n```"
+
+
+def unique_json_object(pairs: list[tuple]) -> dict:
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError("Duplicate JSON field")
+        result[key] = value
+    return result
+
+
+def validate_structured_completion(sha: str, body: str) -> tuple[bool, str]:
+    match = re.fullmatch(
+        re.escape(RESULT_MARKER) + r"\s*```json\n(.*?)\n```(?:\s*(.*))?",
+        body.strip(),
+        re.DOTALL,
+    )
+    if not match or (match[2] and " ".join(match[2].split()) != COMPLETION_FOOTER):
+        return False, "Review result must use schema v1 JSON with no extra review prose"
+    try:
+        result = json.loads(match[1], object_pairs_hook=unique_json_object)
+    except (ValueError, TypeError):
+        return False, "Review result contains invalid or duplicate-field JSON"
+    if not isinstance(result, dict) or set(result) != set(REVIEW_SCHEMA["required"]):
+        return False, "Review result fields do not match schema v1"
+    for name, rule in REVIEW_SCHEMA["properties"].items():
+        value = result[name]
+        expected = int if rule["type"] == "integer" else str
+        if type(value) is not expected:
+            return False, f"Review result field {name} has an invalid type"
+        if (
+            ("const" in rule and value != rule["const"])
+            or ("enum" in rule and value not in rule["enum"])
+            or ("pattern" in rule and not re.fullmatch(rule["pattern"], value))
+            or ("minimum" in rule and value < rule["minimum"])
+        ):
+            return False, f"Review result field {name} does not match schema v1"
+    if result["reviewed_commit"] != sha:
+        return False, "Schema v1 review covers a stale commit"
+    if (result["status"], result["conclusion"], result["blocking_findings"]) != (
+        "completed",
+        "clean",
+        0,
+    ):
+        return False, "Schema v1 review is incomplete, failed, or reports findings"
+    return True, f"Schema v1 clean review covers {sha}; no unresolved blockers"
+
+
 def validate_completion_comment(sha: str, comment: dict, commits: list[dict]) -> tuple[bool, str]:
     body = comment.get("body") or ""
     if REVIEW_ERRORS.search(body) or re.search(r"\[P[01]\]", body):
         return False, "Codex reported an unsuccessful or blocking review"
+    if body.startswith("<!-- dmotion-review-result:"):
+        return validate_structured_completion(sha, body)
     first_line = body.splitlines()[0] if body else ""
     # Only observed decorative closings may follow the clean result. Unknown
     # text could retract completion in a way REVIEW_ERRORS does not recognize.
     if not re.fullmatch(
         r"Codex Review: Didn't find any major issues\."
         r"(?: (?:Swish!|:tada:|Keep it up!|You're on a roll\.|"
-        r"Already looking forward to the next diff\.|"
+        r"Another round soon, please!|Already looking forward to the next diff\.|"
         r"What shall we delve into next\?))?",
         first_line,
     ):
@@ -236,6 +306,8 @@ def validate_formal_review(sha: str, review: dict) -> tuple[bool, str]:
         return False, "Codex reported an unsuccessful review"
     if re.search(r"\[P[01]\]", body):
         return False, "Blocking findings remain in the current review summary"
+    if body.startswith("<!-- dmotion-review-result:"):
+        return validate_structured_completion(sha, body)
     if review["state"] == "COMMENTED" and "codex review" not in body.lower():
         return False, "Unrecognized Codex completion; an explicit reviewed result is required"
     return True, f"Codex review {review['id']} covers {sha}; no unresolved blockers"
@@ -268,7 +340,7 @@ def review_verdict(
         for item in comments or []
         if is_codex(item)
         and (
-            (item.get("body") or "").startswith("Codex Review:")
+            (item.get("body") or "").startswith(("Codex Review:", "<!-- dmotion-review-result:"))
             or REVIEW_ERRORS.search(item.get("body") or "")
         )
     ]
@@ -467,7 +539,13 @@ def ensure_review(github: GitHub, evidence: dict) -> dict | None:
             and comment.get("author_association") in {"OWNER", "MEMBER", "COLLABORATOR"}
         )
         body = comment.get("body") or ""
-        if trusted and body.startswith("@codex review\n") and f"`{sha}`" in body and marker in body:
+        if (
+            trusted
+            and body.startswith("@codex review\n")
+            and f"`{sha}`" in body
+            and marker in body
+            and REQUEST_SCHEMA_MARKER in body
+        ):
             return None
     current = github.api(f"pulls/{pr['number']}")
     if (
@@ -484,7 +562,19 @@ def ensure_review(github: GitHub, evidence: dict) -> dict | None:
             "body": "@codex review\n\n"
             f"Please review latest commit `{sha}` and include the reviewed commit in the result. "
             "The protected merge gate requires a submitted review or explicit clean completion; "
-            "a reaction alone does not identify the reviewed commit.\n\n" + marker
+            "a reaction alone does not identify the reviewed commit.\n\n"
+            "Response contract: after actually completing the review, report findings normally. "
+            "If and only if the review is complete with no findings, post the following exact "
+            "schema v1 JSON result as a separate comment or formal review body. "
+            "Copy the full reviewed SHA. Do not add a greeting, decorative closing, "
+            "or other prose; "
+            "the native About Codex footer is optional. If incomplete or failed, use status "
+            "incomplete/failed and conclusion unavailable instead; never report clean.\n\n"
+            + review_result_message(sha)
+            + "\n\n"
+            + REQUEST_SCHEMA_MARKER
+            + "\n"
+            + marker
         },
     )
 

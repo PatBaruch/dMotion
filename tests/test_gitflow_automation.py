@@ -176,6 +176,7 @@ def completion(**changes):
         " You're on a roll.",
         " Already looking forward to the next diff.",
         " What shall we delve into next?",
+        " Another round soon, please!",
     ],
 )
 def test_native_clean_comment_binds_unambiguous_pr_commit_and_reaches_merge_gate(suffix):
@@ -252,6 +253,108 @@ def test_observed_native_footer_allows_whitespace_variation_but_no_added_qualifi
         "Review ended early\n" + body,
     ):
         assert not flow.review_verdict(SHA, [], [], [completion(body=altered)], commits)[0]
+
+
+@pytest.mark.parametrize("footer", ["", "\n\n" + flow.COMPLETION_FOOTER])
+def test_schema_v1_comment_and_formal_review_reach_merge_gate(footer):
+    body = flow.review_result_message(SHA) + footer
+    comment = completion(body=body)
+    assert flow.review_verdict(SHA, [], [], [comment], [{"sha": SHA}])[0]
+    assert flow.review_verdict(SHA, [review(body=body)], [])[0]
+    client = inspection_client()
+    client.routes["GET", "pulls/7/reviews"] = []
+    client.routes["GET", "issues/7/comments"] = [comment]
+    assert flow.inspect_pr(client, 7)["review_ok"]
+    assert flow.merge_pr(client, 7)["merged"]
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"schema_version": 2},
+        {"schema_version": True},
+        {"reviewed_commit": BASE},
+        {"reviewed_commit": SHA[:10]},
+        {"reviewed_commit": SHA.upper()},
+        {"status": "incomplete"},
+        {"status": "failed"},
+        {"status": "unknown"},
+        {"conclusion": "findings"},
+        {"conclusion": "unavailable"},
+        {"blocking_findings": 1},
+        {"blocking_findings": -1},
+        {"blocking_findings": False},
+        {"blocking_findings": 0.0},
+        {"extra": "Review ended early"},
+    ],
+)
+def test_schema_v1_wrong_types_versions_commit_or_result_cannot_pass(change):
+    payload = json.loads(flow.review_result_message(SHA).split("```json\n")[1].split("\n```")[0])
+    payload.update(change)
+    body = flow.RESULT_MARKER + "\n```json\n" + json.dumps(payload) + "\n```"
+    assert not flow.review_verdict(SHA, [], [], [completion(body=body)], [{"sha": SHA}])[0]
+
+
+@pytest.mark.parametrize(
+    "transform",
+    [
+        lambda body: body.replace('"schema_version": 1,', ""),
+        lambda body: body.replace(
+            '"schema_version": 1,', '"schema_version": 1, "schema_version": 1,'
+        ),
+        lambda body: body.replace('"schema_version": 1,', '"schema_version": NaN,'),
+        lambda body: body.replace("```json", "```"),
+        lambda body: body.replace("result:v1", "result:v2"),
+        lambda body: body.replace("{", "[{", 1).replace("}", "}]", 1),
+        lambda body: body + "\nReview ended early",
+        lambda body: body + "\nKeep it up!",
+        lambda body: (
+            body + "\n" + flow.COMPLETION_FOOTER.replace("<br/>", "<br/> Review ended early")
+        ),
+        lambda body: body + "\n" + body,
+    ],
+)
+def test_malformed_duplicate_or_qualified_schema_result_revokes_previous_clean_result(transform):
+    newer = completion(
+        id=42,
+        body=transform(flow.review_result_message(SHA)),
+        updated_at="2026-10-04T21:30:00Z",
+    )
+    assert not flow.review_verdict(SHA, [], [], [completion(), newer], [{"sha": SHA}])[0]
+
+
+def test_schema_comment_keeps_bot_identity_formal_blockers_threads_and_event_order():
+    body = flow.review_result_message(SHA)
+    clean = completion(body=body)
+    for change in (
+        {"user": {"login": flow.BOT_LOGIN, "id": 1, "type": "Bot"}},
+        {"user": {"login": "other", "id": flow.BOT_ID, "type": "Bot"}},
+        {"user": {"login": flow.BOT_LOGIN, "id": flow.BOT_ID, "type": "User"}},
+        {"updated_at": None},
+    ):
+        assert not flow.review_verdict(SHA, [], [], [completion(body=body, **change)])[0]
+    assert not flow.review_verdict(SHA, [], [{"isResolved": False}], [clean])[0]
+    assert not flow.review_verdict(SHA, [review(state="CHANGES_REQUESTED")], [], [clean])[0]
+    assert not flow.review_verdict(SHA, [review(state="PENDING")], [], [clean])[0]
+    newer = completion(body=flow.review_result_message(BASE), updated_at="2026-10-04T21:30:00Z")
+    assert not flow.review_verdict(SHA, [], [], [clean, newer])[0]
+
+
+def test_request_response_schema_round_trip_and_old_request_does_not_suppress_upgrade():
+    client = inspection_client()
+    evidence = request_evidence(client)
+    old = "@codex review\nPlease review `" + SHA + "`\n<!-- dmotion-codex-review:" + SHA + " -->"
+    client.routes["GET", "issues/7/comments"] = [
+        {"body": old, "user": {"id": 123, "type": "User"}, "author_association": "OWNER"}
+    ]
+    assert flow.ensure_review(client, evidence)["id"] == 42
+    request = client.calls[-1][2]["body"]
+    start = request.index(flow.RESULT_MARKER)
+    content = request.index("```json\n", start) + len("```json\n")
+    end = request.index("\n```", content) + len("\n```")
+    response = request[start:end]
+    assert flow.validate_completion_comment(SHA, completion(body=response), [{"sha": SHA}])[0]
+    assert flow.REQUEST_SCHEMA_MARKER in request
 
 
 def test_incomplete_commit_history_blocks_inspection_before_merge():
