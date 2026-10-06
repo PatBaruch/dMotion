@@ -7,7 +7,7 @@ import pytest
 
 from dmotion.autolabel import _draft_boxes, auto_label
 from dmotion.config import AppConfig
-from dmotion.dataset import Dataset
+from dmotion.dataset import Dataset, _write_json
 from dmotion.detector import Detection
 
 
@@ -204,9 +204,9 @@ def test_interrupted_labeling_resumes_complete_audit_without_replacing_drafts(
         assert calls.count("load") == 1
 
 
-@pytest.mark.parametrize("render_fails", [False, True])
-def test_saved_draft_rebuild_removes_obsolete_pages_only_after_successful_render(
-    tmp_path, monkeypatch, render_fails
+@pytest.mark.parametrize("failure_stage", [None, "render", "report"])
+def test_saved_draft_rebuild_prunes_pages_only_after_committing_the_report(
+    tmp_path, monkeypatch, failure_stage
 ):
     dataset = Dataset(tmp_path / "dataset")
     for index in range(13):
@@ -246,15 +246,25 @@ def test_saved_draft_rebuild_removes_obsolete_pages_only_after_successful_render
     for record in reviewed:
         dataset.review(record["id"], status="negative", boxes=[])
     manifest = dataset.manifest_path.read_bytes()
-    if render_fails:
+    if failure_stage == "render":
 
         def fail(*args):
             raise RuntimeError("render interrupted")
 
         monkeypatch.setattr("dmotion.autolabel._contact_sheets", fail)
-        with pytest.raises(RuntimeError, match="render interrupted"):
+    elif failure_stage == "report":
+
+        def write(path, value):
+            if path.name == "report.json":
+                raise RuntimeError("report interrupted")
+            _write_json(path, value)
+
+        monkeypatch.setattr("dmotion.autolabel._write_json", write)
+    if failure_stage:
+        with pytest.raises(RuntimeError, match="interrupted"):
             auto_label(config, dataset.directory)
         assert obsolete.is_file()
+        assert json.loads(report.read_text())["frames"] == 13
     else:
         summary = json.loads(auto_label(config, dataset.directory).read_text())
         assert summary["frames"] == summary["preserved_frames"] == 11
