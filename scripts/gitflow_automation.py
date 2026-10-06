@@ -264,7 +264,7 @@ def validate_completion_comment(sha: str, comment: dict, commits: list[dict]) ->
     body = comment.get("body") or ""
     if REVIEW_ERRORS.search(body) or re.search(r"\[P[01]\]", body):
         return False, "Codex reported an unsuccessful or blocking review"
-    if body.startswith("<!-- dmotion-review-result:"):
+    if "<!-- dmotion-review-result:" in body:
         return validate_structured_completion(sha, body)
     first_line = body.splitlines()[0] if body else ""
     # Only observed decorative closings may follow the clean result. Unknown
@@ -306,7 +306,7 @@ def validate_formal_review(sha: str, review: dict) -> tuple[bool, str]:
         return False, "Codex reported an unsuccessful review"
     if re.search(r"\[P[01]\]", body):
         return False, "Blocking findings remain in the current review summary"
-    if body.startswith("<!-- dmotion-review-result:"):
+    if "<!-- dmotion-review-result:" in body:
         return validate_structured_completion(sha, body)
     if review["state"] == "COMMENTED" and "codex review" not in body.lower():
         return False, "Unrecognized Codex completion; an explicit reviewed result is required"
@@ -340,7 +340,8 @@ def review_verdict(
         for item in comments or []
         if is_codex(item)
         and (
-            (item.get("body") or "").startswith(("Codex Review:", "<!-- dmotion-review-result:"))
+            (item.get("body") or "").startswith("Codex Review:")
+            or "<!-- dmotion-review-result:" in (item.get("body") or "")
             or REVIEW_ERRORS.search(item.get("body") or "")
         )
     ]

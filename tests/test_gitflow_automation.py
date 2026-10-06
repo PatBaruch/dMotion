@@ -340,6 +340,28 @@ def test_schema_comment_keeps_bot_identity_formal_blockers_threads_and_event_ord
     assert not flow.review_verdict(SHA, [], [], [clean, newer])[0]
 
 
+@pytest.mark.parametrize("prefix", ["\n ", "Note: ", "> ", "Quoted response:\n"])
+@pytest.mark.parametrize("status", ["incomplete", "failed"])
+def test_prefixed_newer_unsuccessful_schema_result_revokes_older_clean_result(prefix, status):
+    body = flow.review_result_message(SHA).replace('"completed"', json.dumps(status))
+    body = body.replace('"clean"', '"unavailable"')
+    newer = completion(body=prefix + body, updated_at="2026-10-04T21:30:00Z")
+    assert not flow.review_verdict(SHA, [], [], [completion(), newer], [{"sha": SHA}])[0]
+
+
+@pytest.mark.parametrize("prefix", ["Note: ", "> ", "Quoted response:\n"])
+def test_extra_prose_before_even_clean_schema_is_rejected_as_newest_event(prefix):
+    body = prefix + flow.review_result_message(SHA)
+    newer = completion(body=body, updated_at="2026-10-04T21:30:00Z")
+    assert not flow.review_verdict(SHA, [], [], [completion(), newer], [{"sha": SHA}])[0]
+    assert not flow.review_verdict(SHA, [review(body=body)], [])[0]
+
+
+def test_whitespace_around_complete_schema_does_not_change_its_result():
+    body = "\n " + flow.review_result_message(SHA) + "\n "
+    assert flow.review_verdict(SHA, [], [], [completion(body=body)])[0]
+
+
 def test_request_response_schema_round_trip_and_old_request_does_not_suppress_upgrade():
     client = inspection_client()
     evidence = request_evidence(client)
