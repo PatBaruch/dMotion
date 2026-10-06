@@ -38,6 +38,10 @@ def train_model(
     patience: int = 10,
     image_size: int = 640,
     device: str = "auto",
+    candidate_directory: Path | None = None,
+    group_splits: dict[str, str] | None = None,
+    evaluate_test: bool = True,
+    initial_model: Path | None = None,
 ) -> Path:
     if type(epochs) is not int or not 1 <= epochs <= 500:
         raise ValueError("Training epochs must be an integer between 1 and 500")
@@ -47,6 +51,10 @@ def train_model(
         raise ValueError("Training image size must be a positive multiple of 32")
     if not isinstance(device, str) or not device.strip():
         raise ValueError("Training device must be auto, cpu, mps, or a CUDA device")
+    if initial_model is not None:
+        initial_model = Path(initial_model).expanduser().resolve()
+        if not initial_model.is_file():
+            raise ValueError(f"Initial model checkpoint does not exist: {initial_model}")
     dataset = Dataset(dataset_directory)
     pending = dataset.summary()["ai_suggested"]
     if pending:
@@ -54,7 +62,16 @@ def train_model(
             f"{pending} AI-labeled pictures still need review. Run make label, "
             "save correct cash boxes or mark no cash/skip, then train."
         )
-    data_path = export_dataset(dataset, config.root / "data" / "yolo")
+    if candidate_directory is not None:
+        candidate_directory = Path(candidate_directory).resolve()
+        if candidate_directory.exists() and any(candidate_directory.iterdir()):
+            raise ValueError("Candidate output must be a new or empty directory")
+    export_directory = (
+        candidate_directory / "yolo"
+        if candidate_directory is not None
+        else config.root / "data/yolo"
+    )
+    data_path = export_dataset(dataset, export_directory, group_splits=group_splits)
     export_report = json.loads((data_path.parent / "export-report.json").read_text())
     for warning in export_report["warnings"]:
         logger.warning(warning)
@@ -68,7 +85,7 @@ def train_model(
     timestamp = datetime.now(UTC)
     run_name = timestamp.strftime("spread-%Y%m%d-%H%M%S-") + uuid4().hex[:6]
     project = config.root / "outputs" / "training"
-    pretrained_path = config.root / "models" / "yolo26n.pt"
+    pretrained_path = initial_model or config.root / "models" / "yolo26n.pt"
     pretrained_path.parent.mkdir(parents=True, exist_ok=True)
     logger.info("Training reviewed spreads on %s; run %s", selected_device, run_name)
     model = YOLO(str(pretrained_path))
@@ -122,20 +139,29 @@ def train_model(
     if not best.is_file():
         raise RuntimeError("Training finished without a best model checkpoint")
     # Evaluation never uses the training or validation sessions.
-    evaluation = YOLO(str(best)).val(
-        data=str(data_path),
-        split="test",
-        imgsz=image_size,
-        device=selected_device,
-        batch=4,
-        workers=0,
-        project=str(project),
-        name=f"{run_name}-test",
-        exist_ok=False,
-        plots=False,
-        verbose=False,
+    evaluation = (
+        YOLO(str(best)).val(
+            data=str(data_path),
+            split="test",
+            imgsz=image_size,
+            device=selected_device,
+            batch=4,
+            workers=0,
+            project=str(project),
+            name=f"{run_name}-test",
+            exist_ok=False,
+            plots=False,
+            verbose=False,
+        )
+        if evaluate_test
+        else None
     )
-    destination = config.root / "models" / "money-spread.pt"
+    destination = (
+        candidate_directory / "candidate.pt"
+        if candidate_directory is not None
+        else config.root / "models" / "money-spread.pt"
+    )
+    destination.parent.mkdir(parents=True, exist_ok=True)
     descriptor, temporary = tempfile.mkstemp(prefix=".money-spread-", dir=destination.parent)
     os.close(descriptor)
     try:
@@ -148,6 +174,12 @@ def train_model(
         "created_at": timestamp.isoformat(),
         "run": run_name,
         "pretrained": str(pretrained_path),
+        "initial_model_override": initial_model is not None,
+        "pretrained_sha256": (
+            hashlib.sha256(pretrained_path.read_bytes()).hexdigest()
+            if pretrained_path.is_file()
+            else None
+        ),
         "model": str(destination),
         "model_sha256": hashlib.sha256(destination.read_bytes()).hexdigest(),
         "checkpoint": str(best),
@@ -161,7 +193,12 @@ def train_model(
         "splits": export_report["splits"],
         "warnings": export_report["warnings"],
         "test_metrics": _numeric_metrics(evaluation),
-        "evaluation_note": "Test images come from groups not used to fit or select this model.",
+        "candidate_only": candidate_directory is not None,
+        "evaluation_note": (
+            "Test images come from groups not used to fit or select this model."
+            if evaluate_test
+            else "Test evaluation deferred to the harness after validation calibration."
+        ),
     }
     _write_json(project / run_name / "dataset-provenance.json", export_report)
     _write_json(project / run_name / "training-info.json", info)

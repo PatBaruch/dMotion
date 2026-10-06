@@ -265,6 +265,8 @@ excluded from version control.
 
 Model API reference: [Ultralytics YOLO-World](https://docs.ultralytics.com/models/yolo-world/).
 
+For paired-video training, selectable labeling teachers and candidate comparisons,
+see [Training harness](docs/TRAINING_HARNESS.md).
 New uploads can be placed in `data/videos/` or `data/photos/` directly.
 `make organize-media` sorts loose media from the root and `data/`, preserving
 filenames, checksums and existing labels. See [file layout](docs/FILE_LAYOUT.md).

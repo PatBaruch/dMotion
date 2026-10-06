@@ -31,6 +31,9 @@ def parser() -> argparse.ArgumentParser:
         ("fetch", "Download a curated JSON list of image URLs"),
         ("build-dataset", "Export reviewed examples to grouped YOLO splits"),
         ("train", "Train a small money-spread model from reviewed examples"),
+        ("harness-labelers", "Compare saved labeling drafts against the same reviewed frames"),
+        ("harness-import", "Sample related videos into one recording-session group"),
+        ("harness-train", "Train and compare a candidate using a frozen session split plan"),
     ]:
         command = commands.add_parser(name, help=help_text)
         command.add_argument("--config", type=Path, default=Path("config.toml"))
@@ -68,12 +71,19 @@ def parser() -> argparse.ArgumentParser:
             "fetch",
             "build-dataset",
             "train",
+            "harness-import",
+            "harness-train",
+            "harness-labelers",
         }:
             command.add_argument("--dataset", type=Path, default=Path("data/training"))
         if name == "auto-label":
             command.set_defaults(confidence=0.1, image_size=640, device="cpu")
             command.add_argument("--output", type=Path)
-            command.add_argument("--engine", choices=("world", "grounding"), default="world")
+            command.add_argument(
+                "--engine", choices=("world", "grounding", "yoloe"), default="world"
+            )
+            command.add_argument("--grounding-model", choices=("tiny", "base"), default="tiny")
+            command.add_argument("--reference", type=Path)
         if name == "label":
             command.add_argument("--port", type=int, default=0)
             command.add_argument("--no-browser", action="store_true")
@@ -91,7 +101,23 @@ def parser() -> argparse.ArgumentParser:
         if name == "fetch":
             command.add_argument("sources", type=Path)
             command.add_argument("--limit", type=int, default=20)
-        if name == "train":
+        if name == "harness-labelers":
+            command.add_argument("predictions", type=Path, nargs="+")
+            command.add_argument("--output", required=True, type=Path)
+            command.add_argument("--confidence", type=float, default=0.25)
+        if name == "harness-import":
+            command.add_argument("paths", type=Path, nargs="+")
+            command.add_argument("--session", required=True)
+            command.add_argument("--interval", type=float, default=3)
+        if name == "harness-train":
+            command.add_argument("--splits", required=True, type=Path)
+            command.add_argument("--baseline", type=Path)
+            command.add_argument("--initial-model", type=Path)
+            command.add_argument("--output", type=Path)
+            command.add_argument("--max-false-alarm-rate", type=float, default=0.05)
+            command.add_argument("--min-precision", type=float, default=0.8)
+            command.add_argument("--min-recall", type=float, default=0.5)
+        if name in {"train", "harness-train"}:
             command.add_argument("--epochs", type=int, default=30)
             command.add_argument("--patience", type=int, default=10)
             command.add_argument("--image-size", type=int, default=640)
@@ -176,7 +202,14 @@ def main(argv: list[str] | None = None) -> int:
             if args.command == "auto-label":
                 from dmotion.autolabel import auto_label
 
-                report = auto_label(config, directory, output=args.output, engine=args.engine)
+                report = auto_label(
+                    config,
+                    directory,
+                    output=args.output,
+                    engine=args.engine,
+                    grounding_model=args.grounding_model,
+                    reference=args.reference,
+                )
                 print(f"AI suggestions saved. Open make label to review. Report: {report}")
                 return 0
             if args.command == "collect":
@@ -212,6 +245,42 @@ def main(argv: list[str] | None = None) -> int:
                 return 0 if report["downloaded"] else 1
             if args.command == "build-dataset":
                 print(export_dataset(Dataset(directory), config.root / "data/yolo"))
+                return 0
+            if args.command == "harness-labelers":
+                from dmotion.harness import compare_label_drafts
+
+                print(
+                    compare_label_drafts(
+                        directory, args.predictions, args.output, confidence=args.confidence
+                    )
+                )
+                return 0
+            if args.command == "harness-import":
+                from dmotion.collect import import_video
+
+                for video in args.paths:
+                    import_video(directory, video, interval=args.interval, session=args.session)
+                print("Frames are unreviewed. Generate AI drafts, then review or exclude them.")
+                return 0
+            if args.command == "harness-train":
+                from dmotion.harness import run_harness
+
+                report = run_harness(
+                    config,
+                    directory,
+                    args.splits,
+                    output=args.output,
+                    baseline=args.baseline,
+                    epochs=args.epochs,
+                    patience=args.patience,
+                    image_size=args.image_size,
+                    device=args.device,
+                    max_false_alarm_rate=args.max_false_alarm_rate,
+                    min_precision=args.min_precision,
+                    min_recall=args.min_recall,
+                    initial_model=args.initial_model,
+                )
+                print(f"Candidate comparison saved to {report}. Active checkpoint was preserved.")
                 return 0
             if args.command == "train":
                 from dmotion.training import train_model

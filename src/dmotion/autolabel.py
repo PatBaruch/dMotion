@@ -80,13 +80,23 @@ def _contact_sheets(dataset: Dataset, records: list[dict], output: Path) -> list
 
 
 def auto_label(
-    config: AppConfig, directory: Path, *, output: Path | None = None, engine: str = "world"
+    config: AppConfig,
+    directory: Path,
+    *,
+    output: Path | None = None,
+    engine: str = "world",
+    grounding_model: str = "tiny",
+    reference: Path | None = None,
 ) -> Path:
     """Persist model suggestions without accepting any positives or negatives."""
-    if engine not in {"world", "grounding"}:
-        raise ValueError("Auto-label engine must be world or grounding")
+    if engine not in {"world", "grounding", "yoloe"}:
+        raise ValueError("Auto-label engine must be world, grounding or yoloe")
     if engine == "world" and config.detector.backend != "world":
         raise ValueError("Auto-labeling needs the prompt model, not a previously trained detector")
+    if grounding_model not in {"tiny", "base"}:
+        raise ValueError("Grounding model must be tiny or base")
+    if engine == "yoloe" and reference is None:
+        raise ValueError("YOLOE labeling needs --reference with a boxed cash reference")
     dataset = Dataset(directory)
     pending = [record for record in dataset.records() if record["status"] == "unreviewed"]
     if not pending:
@@ -104,10 +114,24 @@ def auto_label(
             raise ValueError("Prepare the prompt detector before auto-labeling (make prepare)")
         model_digest = hashlib.sha256(model.read_bytes()).hexdigest()
         detector = MoneyDetector(config)
+    elif engine == "yoloe":
+        from dmotion.teachers import ReferenceTeacher
+
+        model = config.resolve(config.detector.model)
+        model_digest = hashlib.sha256(model.read_bytes()).hexdigest()
+        detector = ReferenceTeacher(
+            config.root,
+            model,
+            Path(reference).resolve(),
+            confidence=config.detector.confidence,
+            image_size=config.detector.image_size,
+            device=config.detector.device,
+        )
     else:
         from dmotion.grounding import GroundingMoneyDetector
+        from dmotion.teachers import GROUNDING_MODELS
 
-        model = "IDEA-Research/grounding-dino-tiny"
+        model, model_revision = GROUNDING_MODELS[grounding_model]
         model_digest = None
         detector = GroundingMoneyDetector(
             config.root,
@@ -115,10 +139,14 @@ def auto_label(
             prompts=config.detector.prompts,
             image_size=config.detector.image_size,
             device=config.detector.device,
+            model_id=model,
+            revision=model_revision,
         )
     records = []
     logger.info("Suggesting cash boxes for %s pictures on %s", len(pending), detector.device)
-    revision = getattr(getattr(detector.model, "config", None), "_commit_hash", None)
+    revision = getattr(getattr(detector.model, "config", None), "_commit_hash", None) or getattr(
+        detector, "revision", None
+    )
     for index, record in enumerate(pending, start=1):
         source = dataset.image_path(record)
         if hashlib.sha256(source.read_bytes()).hexdigest() != record["sha256"]:
@@ -138,6 +166,7 @@ def auto_label(
             "model": str(model),
             "model_sha256": model_digest,
             "model_revision": revision,
+            "reference": getattr(detector, "reference_provenance", None),
             "raw_box_count": len(predictions),
             "overlap_threshold": 0.5,
             "prompts": list(config.detector.prompts),
