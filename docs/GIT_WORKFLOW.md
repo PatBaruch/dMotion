@@ -161,9 +161,10 @@ reviews use `incomplete`/`failed` status and `unavailable` conclusion; findings
 are reported normally and must be resolved before clean completion. No prose may
 precede or follow the JSON result, except the observed native About Codex footer.
 The parser validates footer content while allowing whitespace variations.
-Any authenticated comment containing the result marker enters event ordering,
-even with a bad prefix: a newer malformed/incomplete result revokes an older
-clean result rather than being ignored. Surrounding whitespace is accepted.
+Every authenticated bot comment except the native activity-summary table enters
+event ordering. A newer malformed, markerless, unknown, or incomplete result
+revokes older clean evidence rather than being ignored. Surrounding whitespace
+is accepted for an otherwise valid schema message.
 
 Requests carry a schema-version marker as well as the commit marker, so an older
 request without the contract does not suppress the first schema v1 request.

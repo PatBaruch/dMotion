@@ -363,6 +363,45 @@ def test_whitespace_around_complete_schema_does_not_change_its_result():
     assert flow.review_verdict(SHA, [], [], [completion(body=body)])[0]
 
 
+@pytest.mark.parametrize("status", ["completed", "incomplete", "failed"])
+@pytest.mark.parametrize("prefix", ["", "Note: ", "> "])
+def test_markerless_schema_result_is_decisive_and_rejected(status, prefix):
+    body = flow.review_result_message(SHA).split("\n", 1)[1]
+    body = body.replace('"completed"', json.dumps(status))
+    newer = completion(body=prefix + body, updated_at="2026-10-04T21:30:00Z")
+    assert not flow.review_verdict(SHA, [], [], [completion(), newer], [{"sha": SHA}])[0]
+    assert not flow.review_verdict(SHA, [review(body="Codex Review\n" + body)], [])[0]
+
+
+@pytest.mark.parametrize("body", ["", "Unknown format", "Review ended early", "```json\n{}\n```"])
+def test_newer_unknown_bot_comment_revokes_old_result(body):
+    newer = completion(body=body, updated_at="2026-10-04T21:30:00Z")
+    assert not flow.review_verdict(SHA, [], [], [completion(), newer], [{"sha": SHA}])[0]
+
+
+def test_native_activity_table_is_the_only_nondecisive_bot_comment():
+    activity = completion(
+        body=json.loads(
+            (Path(__file__).parent / "fixtures/codex_activity_summary.json").read_text()
+        )["body"],
+        updated_at="2026-10-04T21:30:00Z",
+    )
+    assert flow.review_verdict(SHA, [], [], [completion(), activity], [{"sha": SHA}])[0]
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        flow.ACTIVITY_MARKER + "\nReview ended early",
+        flow.ACTIVITY_MARKER + "\n" + flow.review_result_message(SHA),
+        flow.ACTIVITY_MARKER + '\n```json\n{"status":"failed"}\n```',
+    ],
+)
+def test_activity_marker_cannot_hide_malformed_or_failed_review_result(body):
+    newer = completion(body=body, updated_at="2026-10-04T21:30:00Z")
+    assert not flow.review_verdict(SHA, [], [], [completion(), newer], [{"sha": SHA}])[0]
+
+
 def test_request_response_schema_round_trip_and_old_request_does_not_suppress_upgrade():
     client = inspection_client()
     evidence = request_evidence(client)

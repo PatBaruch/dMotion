@@ -25,6 +25,7 @@ REVIEW_ERRORS = re.compile(
 
 
 RESULT_MARKER = "<!-- dmotion-review-result:v1 -->"
+ACTIVITY_MARKER = "<!-- codex-pull-request-review-summary -->"
 REQUEST_SCHEMA_MARKER = "<!-- dmotion-review-schema:v1 -->"
 REVIEW_SCHEMA = json.loads(
     (
@@ -42,6 +43,16 @@ Reviews are triggered when you - Open a pull request for review - Mark a draft a
 - Comment "@codex review". If Codex has suggestions, it will comment; otherwise it will
 react with 👍. Codex can also answer questions or update the PR. Try commenting "@codex
 address that feedback". </details>""".split()
+)
+
+
+ACTIVITY_FOOTER = " ".join(
+    """<details> <summary>ℹ️ About Codex in GitHub</summary> <br/> [Your team has set up Codex
+to review pull requests in this repo](https://chatgpt.com/codex/cloud/settings/general).
+Reviews are triggered when you - Open a pull request for review - Mark a draft as ready
+- Comment "@codex review" or "@codex security review". Codex reacts with 👀 while any
+review is running, comments if it has suggestions, and reacts with 👍 once all reviews
+finish with no findings. </details>""".split()
 )
 
 
@@ -223,6 +234,42 @@ def unique_json_object(pairs: list[tuple]) -> dict:
     return result
 
 
+def is_activity_comment(body: str) -> bool:
+    table, separator, footer = body.partition("<details>")
+    if not separator or " ".join((separator + footer).split()) != ACTIVITY_FOOTER:
+        return False
+    lines = [line for line in table.splitlines() if line]
+    expected = [
+        ACTIVITY_MARKER,
+        "## Codex Review Summary",
+        "This comment shows the latest Codex review activity on this pull request.",
+        "| Review | Status | Commit | Review trigger |",
+        "| --- | --- | --- | --- |",
+    ]
+    return (
+        lines[:5] == expected
+        and len(lines) > 5
+        and all(
+            re.fullmatch(
+                r"\| 📝 \*\*Code Review\*\* \| (?:✅ \*\*Completed\*\* |"
+                r'🔄 \*\*Running\*\* since )<relative-time datetime="([0-9T:Z.+-]+)">'
+                r"\1</relative-time> \| `[0-9a-f]{7,40}` \| "
+                r"(?:Manual request|New commits|Opened pull request|Ready for review) \|",
+                line,
+            )
+            for line in lines[5:]
+        )
+    )
+
+
+def is_schema_result(body: str) -> bool:
+    return "<!-- dmotion-review-result:" in body or bool(
+        re.search(
+            r'"(?:schema_version|reviewed_commit|status|conclusion|blocking_findings)"\s*:', body
+        )
+    )
+
+
 def validate_structured_completion(sha: str, body: str) -> tuple[bool, str]:
     match = re.fullmatch(
         re.escape(RESULT_MARKER) + r"\s*```json\n(.*?)\n```(?:\s*(.*))?",
@@ -264,7 +311,7 @@ def validate_completion_comment(sha: str, comment: dict, commits: list[dict]) ->
     body = comment.get("body") or ""
     if REVIEW_ERRORS.search(body) or re.search(r"\[P[01]\]", body):
         return False, "Codex reported an unsuccessful or blocking review"
-    if "<!-- dmotion-review-result:" in body:
+    if is_schema_result(body):
         return validate_structured_completion(sha, body)
     first_line = body.splitlines()[0] if body else ""
     # Only observed decorative closings may follow the clean result. Unknown
@@ -306,7 +353,7 @@ def validate_formal_review(sha: str, review: dict) -> tuple[bool, str]:
         return False, "Codex reported an unsuccessful review"
     if re.search(r"\[P[01]\]", body):
         return False, "Blocking findings remain in the current review summary"
-    if "<!-- dmotion-review-result:" in body:
+    if is_schema_result(body):
         return validate_structured_completion(sha, body)
     if review["state"] == "COMMENTED" and "codex review" not in body.lower():
         return False, "Unrecognized Codex completion; an explicit reviewed result is required"
@@ -335,15 +382,12 @@ def review_verdict(
     if any(not thread["isResolved"] for thread in threads):
         return False, "Unresolved review conversations remain"
     formal = [item for item in reviews if is_codex(item)]
+    # Only the native activity table is non-decisive. Unknown/malformed bot
+    # output must revoke earlier clean evidence rather than disappear.
     candidates = [
         item
         for item in comments or []
-        if is_codex(item)
-        and (
-            (item.get("body") or "").startswith("Codex Review:")
-            or "<!-- dmotion-review-result:" in (item.get("body") or "")
-            or REVIEW_ERRORS.search(item.get("body") or "")
-        )
+        if is_codex(item) and not is_activity_comment(item.get("body") or "")
     ]
     if any(not item.get("submitted_at") or not item.get("updated_at") for item in formal):
         return False, "Codex formal review lacks submission/edit evidence"
