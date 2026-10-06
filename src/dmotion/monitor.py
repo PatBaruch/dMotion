@@ -14,7 +14,6 @@ class InferenceMonitor:
     discarded: int = 0
     inference_ms: float = 0.0
     captured_at: float = float("-inf")
-    last_match: Detection | None = None
     last_result_stale: bool = False
     error: str | None = None
     detections: list[Detection] = field(default_factory=list)
@@ -29,8 +28,6 @@ class InferenceMonitor:
             self.detections = []
             return False
         self.detections = detections
-        if detections:
-            self.last_match = max(detections, key=lambda detection: detection.confidence)
         # Only actual fresh inference results are observations for the alert gate.
         return self.trigger.update(bool(detections), finished_at)
 
@@ -40,17 +37,15 @@ class InferenceMonitor:
             return []
         return self.detections
 
-    def headline(self, now: float, *, checking: bool, confidence: float) -> str:
+    def headline(self, now: float, *, confidence: float) -> str:
         if self.error:
             return "AI stopped: see error below"
         if not self.completed:
             return "AI warming up... waiting for the first result"
         if self.last_result_stale:
             return "AI too slow: last result discarded"
-        if checking and self.last_match:
-            return f"AI CHECK PASSED: recognized {self.last_match.label}"
         if self.visible(now):
-            return "OBJECT DETECTED" if checking else "MONEY DETECTED"
+            return "CASH DETECTED"
         if now - self.captured_at > self.max_result_age_seconds:
             return "AI running... waiting for a fresh result"
         return f"AI running: no match above {confidence:.2f}"

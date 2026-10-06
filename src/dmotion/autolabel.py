@@ -33,7 +33,7 @@ def _draft_boxes(detections, width: int, height: int) -> tuple[list, list, list]
         box = [max(0, x1), max(0, y1), min(width, x2), min(height, y2)]
         if box[0] >= box[2] or box[1] >= box[3]:
             continue
-        # Cash prompts describe the same class. Keep one proposal per overlapping object.
+        # Cash detections describe the same class. Keep one proposal per overlapping object.
         if any(_overlap(box, kept) >= 0.5 for kept in boxes):
             continue
         boxes.append(box)
@@ -79,16 +79,14 @@ def _contact_sheets(dataset: Dataset, records: list[dict], output: Path) -> list
     return paths
 
 
-def auto_label(
-    config: AppConfig, directory: Path, *, output: Path | None = None, engine: str = "world"
-) -> Path:
+def auto_label(config: AppConfig, directory: Path, *, output: Path | None = None) -> Path:
     """Persist model suggestions without accepting any positives or negatives."""
-    if engine not in {"world", "grounding"}:
-        raise ValueError("Auto-label engine must be world or grounding")
-    if engine == "world" and config.detector.backend != "world":
-        raise ValueError("Auto-labeling needs the prompt model, not a previously trained detector")
     dataset = Dataset(directory)
-    pending = [record for record in dataset.records() if record["status"] == "unreviewed"]
+    pending = [
+        record
+        for record in dataset.records()
+        if record["status"] == "unreviewed" and "suggestion" not in record
+    ]
     if not pending:
         raise ValueError("No unreviewed pictures. Import your videos before auto-labeling.")
     output = config.resolve("outputs/video-autolabel") if output is None else Path(output).resolve()
@@ -98,27 +96,17 @@ def auto_label(
     created = datetime.now(UTC).isoformat()
     import cv2
 
-    if engine == "world":
-        model = config.resolve(config.detector.model)
-        if not model.is_file():
-            raise ValueError("Prepare the prompt detector before auto-labeling (make prepare)")
-        model_digest = hashlib.sha256(model.read_bytes()).hexdigest()
-        detector = MoneyDetector(config)
-    else:
-        from dmotion.grounding import GroundingMoneyDetector
-
-        model = "IDEA-Research/grounding-dino-tiny"
-        model_digest = None
-        detector = GroundingMoneyDetector(
-            config.root,
-            confidence=config.detector.confidence,
-            prompts=config.detector.prompts,
-            image_size=config.detector.image_size,
-            device=config.detector.device,
+    model = config.resolve(config.detector.model)
+    if not model.is_file():
+        raise ValueError(
+            "Supply a trained YOLO26m cash checkpoint with --model before auto-labeling"
         )
+    with model.open("rb") as checkpoint:
+        model_digest = hashlib.file_digest(checkpoint, "sha256").hexdigest()
+    detector = MoneyDetector(config)
     records = []
     logger.info("Suggesting cash boxes for %s pictures on %s", len(pending), detector.device)
-    revision = getattr(getattr(detector.model, "config", None), "_commit_hash", None)
+    revision = f"sha256:{model_digest}"
     for index, record in enumerate(pending, start=1):
         source = dataset.image_path(record)
         if hashlib.sha256(source.read_bytes()).hexdigest() != record["sha256"]:
@@ -140,7 +128,8 @@ def auto_label(
             "model_revision": revision,
             "raw_box_count": len(predictions),
             "overlap_threshold": 0.5,
-            "prompts": list(config.detector.prompts),
+            # Legacy manifest schema calls the fixed target class prompts.
+            "prompts": ["cash"],
             "created_at": created,
             "confidence_threshold": config.detector.confidence,
             "image_size": config.detector.image_size,
@@ -157,12 +146,11 @@ def auto_label(
         "version": 1,
         "created_at": created,
         "dataset": str(dataset.directory),
-        "engine": engine,
+        "engine": "yolo26m",
         "model": str(model),
         "model_sha256": model_digest,
         "model_revision": revision,
         "device": detector.device,
-        "prompts": list(config.detector.prompts),
         "confidence_threshold": config.detector.confidence,
         "image_size": config.detector.image_size,
         "frames": len(records),

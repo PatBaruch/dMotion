@@ -16,4 +16,4 @@ if [ ! -x .tools/bin/uv ]; then
     .tools/bin/python -m pip install --disable-pip-version-check uv==0.12.22
 fi
 .tools/bin/uv sync --locked --extra vision --python "$task_python" --cache-dir "$PWD/.cache/uv"
-printf '\nSetup complete. Run make prepare, then make run.\n'
+printf '\nSetup complete. Run make demo to check camera/audio. Supply a cash checkpoint or follow README to train YOLO26m.\n'

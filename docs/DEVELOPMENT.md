@@ -1,103 +1,63 @@
 # Development
 
-## Git
+The [README](../README.md) is the complete user guide. The [file map](FILE_LAYOUT.md)
+identifies modules and local artifacts. This branch maintains YOLO26m only.
 
-The remote is [PatBaruch/dMotion](https://github.com/PatBaruch/dMotion).
-`main` holds released code; `develop` integrates completed features. New work uses
-`feature/<name>` from `origin/develop`, preferably in its own worktree. Releases
-use `release/<version>`; urgent release fixes use `hotfix/<name>`.
+## Core environment and checks
 
-Agents automatically update documentation, run checks, commit task files, push
-the branch, and create or update a pull request. The full process, one-time setup,
-and remaining review settings are in [Git workflow](GIT_WORKFLOW.md). No separate
-instruction to run tests or publish a completed feature is needed.
-
-Keep model binaries, photos, caches, and personal settings out of commits. Existing
-changes belonging to other tasks must be preserved, not included in feature PRs.
-
-## Dependencies
-
-`make setup` installs exactly the versions in `uv.lock`. Avoid installing untracked
-packages directly into `.venv`. To add or update a dependency intentionally:
+Use Python 3.11–3.13 and the dependency versions in `uv.lock`:
 
 ```sh
-.tools/bin/uv add --optional vision package-name --cache-dir .cache/uv
-.tools/bin/uv lock --upgrade-package ultralytics --cache-dir .cache/uv
-make setup
+uv sync --locked --python 3.11
+make setup-workflow
 make check
-make prepare
-git add pyproject.toml uv.lock
+make audit
+make package-check
 ```
 
-CLIP is pinned to a specific commit in the Ultralytics-maintained repository so
-prompt encoding does not silently install an untracked package at runtime.
-Ultralytics automatic package installation is disabled by the app.
+If `make setup` already installed uv, use `.tools/bin/uv`; put `.tools/bin` on PATH
+for `make package-check`. Core checks need no camera, audio device, model download,
+or vision packages. Use `make setup` for a separate hardware/model environment.
+Do not replace an environment used by an active training run with core-only sync.
 
-For core-only development or CI:
+Use Context7 for uncertain external behavior and verify against the pinned source.
+Use codebase-memory-mcp for architecture/call tracing, select the exact checkout,
+check coverage/freshness, and read source before editing. Graph omissions do not
+prove a feature is absent.
+
+## Model and data contracts
+
+Inference loads a user-selected single-class cash checkpoint through `YOLO`.
+Accept `cash` and legacy `money_spread` labels. It must not silently download a
+generic model when a cash checkpoint is missing. Old mode aliases preserve model
+paths and confidence. Training initializes YOLO26m and saves a separate candidate;
+it must not replace the user's live checkpoint or select confidence from test data.
+
+Reviewed truth lives in dataset manifests. AI suggestions stay pending, including
+empty detections. Recording groups remain intact across splits; related videos
+from a physical session must share a group. Keep historical suggestion metadata
+readable even after the generating backend is retired. Existing datasets remain
+compatible; the legacy exported class name is retained.
+
+Unit tests establish software behavior. Hardware acceptance and held-out model
+evaluation are separate checks. Follow [AI reliability](AI_RELIABILITY.md).
+
+## Dependencies and publication
+
+Change declarations and lock together; do not upgrade unrelated packages during
+cleanup. YOLO26m needs no project CLIP or Transformers optional integration.
 
 ```sh
-.tools/bin/uv sync --locked --cache-dir .cache/uv
+uv add --optional vision package-name
+uv lock --upgrade-package package-name
 make check
 ```
 
-This omits the `vision` extra. Run `make setup` again before testing the camera.
+The remote is [PatBaruch/dMotion](https://github.com/PatBaruch/dMotion). Start features
+from current `origin/develop` in an isolated `feature/<name>` worktree. Keep model
+binaries, datasets, outputs, credentials and unrelated work out of commits.
+See [Git workflow](GIT_WORKFLOW.md) for checks, automatic PR completion and protected
+merge rules. Pending or missing latest-commit review never counts as passed.
 
-## Architecture
-
-- `config.py`: typed TOML settings and validation.
-- `detector.py`: model loading, device selection, box/score conversion.
-- `trigger.py`: confirmation, absence reset, and cooldown state machine.
-- `audio.py`: preloaded sound with a generated-beep fallback.
-- `app.py`: camera lifecycle, one in-flight inference, overlay, photo output.
-- `cli.py`: commands, overrides, diagnostics, readable errors.
-
-Core tests cover missed/brief detections, held cash, rearming, cooldown, invalid
-settings, path resolution, and the audio fallback format. Before changing the
-detector, manually test a real spread, empty hands, a single bill, cards/paper,
-and removal/reappearance. Keep different recording sessions separate if you later
-train a custom model.
-
-## Diagnostic testing
-
-Use `make diagnose`, `diagnose.command`, or `.venv/bin/dmotion run --mode check`
-to check real inference with common objects. Check mode changes prompts to person,
-cell phone, cup, bottle, and book, and sets confidence to `0.25`; it uses the same
-detector and camera path as default money mode. `image` and `prepare` also accept
-`--mode check` for tests without live camera input.
-
-The overlay exposes warm-up, model-running status, processed-frame count, and
-no-objects, objects, or too-slow results. A detected person verifies the pipeline,
-while unsuccessful money detection can still reflect the pretrained model's
-limitations. `T` checks sound and `S` saves a raw photo for repeatable testing.
-Demo mode uses a simulated box and does not verify model recognition. Automated
-checks do not establish camera hardware behavior or real-money accuracy; record
-those results separately when testing on the laptop.
-
-## Custom training workflow
-
-The [training guide](TRAINING.md) covers collection, local annotation, imports,
-downloads, dataset building, and custom detector training. `--mode trained` selects
-the `money_spread` model while preserving the camera, audio, and trigger logic.
-
-Review status and session groups are part of the dataset, not incidental UI state.
-Never infer a negative label from an unreviewed image. Keep recording sessions
-together across train, validation, and test splits; splitting adjacent frames
-randomly can produce misleading results. Validate bounding boxes before export.
-
-Datasets and trained weights are excluded from Git. Keep repeatable training
-settings and code in version control, and back up the source dataset and useful
-training runs separately. Core checks must continue to run without camera
-hardware, downloaded weights, or the optional vision dependencies.
-
-## Licensing
-
-No publication license has been selected for this project. Ultralytics code and
-weights have their own terms; consult its [licensing page](https://www.ultralytics.com/license)
-when choosing how to distribute a future product. Other dependencies retain their
-respective licenses.
-
-## Provided media
-
-Use `make organize-media` to sort loose recordings and photos. The organizer
-records checksums and path moves without editing dataset truth or frozen training
-evidence. See [file layout](FILE_LAYOUT.md) and the [YOLOE training route](YOLOE_FINETUNING.md).
+No publication license has been selected. Dependencies and external data retain
+their own terms; assess them before distributing a product.

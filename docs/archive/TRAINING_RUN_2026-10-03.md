@@ -1,3 +1,5 @@
+> Historical experiment, retained for provenance. The supported workflow is YOLO26m; see [README](../../README.md).
+
 # Training run — 3 October 2026
 
 The camera's trained mode now loads a model trained on the reviewed video frames

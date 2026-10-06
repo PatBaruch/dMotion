@@ -35,7 +35,6 @@ def install_fake_models(monkeypatch, *, names=None):
         "ultralytics",
         SimpleNamespace(
             YOLO=lambda path: FakeModel(path, "trained"),
-            YOLOWorld=lambda path: FakeModel(path, "world"),
             settings=SimpleNamespace(update=lambda value: None),
         ),
     )
@@ -49,7 +48,7 @@ def trained_config(tmp_path):
         detector=replace(
             config.detector,
             backend="trained",
-            model="models/money-spread.pt",
+            model="models/cash-yolo26m.pt",
         ),
     )
 
@@ -75,7 +74,7 @@ def test_trained_detector_rejects_other_detection_classes(tmp_path, monkeypatch,
     path = config.resolve(config.detector.model)
     path.parent.mkdir()
     path.write_bytes(b"model placeholder")
-    with pytest.raises(ValueError, match="money_spread class"):
+    with pytest.raises(ValueError, match="single cash or money_spread class"):
         MoneyDetector(config)
     assert not any(call[0] == "to" for call in calls)
 
@@ -85,15 +84,16 @@ def test_trained_detector_explains_missing_checkpoint_without_downloading_a_gene
     monkeypatch,
 ):
     calls = install_fake_models(monkeypatch)
-    with pytest.raises(FileNotFoundError, match="Review your photos and run make train"):
+    with pytest.raises(FileNotFoundError, match="Supply --model"):
         MoneyDetector(trained_config(tmp_path))
     assert calls == []
 
 
-def test_world_detector_still_encodes_requested_prompts(tmp_path, monkeypatch):
-    calls = install_fake_models(monkeypatch)
-    config = AppConfig(root=tmp_path)
+def test_semantic_cash_class_is_accepted_without_prompt_encoding(tmp_path, monkeypatch):
+    calls = install_fake_models(monkeypatch, names={0: "cash"})
+    config = trained_config(tmp_path)
+    path = config.resolve(config.detector.model)
+    path.parent.mkdir()
+    path.write_bytes(b"cash checkpoint")
     MoneyDetector(config)
-    assert calls[0][1] == "world"
-    assert calls[1] == ("set_classes", list(config.detector.prompts))
-    assert calls[2] == ("to", "cpu")
+    assert calls == [("load", "trained", str(path)), ("to", "cpu")]

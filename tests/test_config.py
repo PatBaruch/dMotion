@@ -9,8 +9,8 @@ from dmotion.config import AppConfig, load_config, validate
 def test_repository_config_loads_and_resolves_paths():
     root = Path(__file__).resolve().parents[1]
     config = load_config(root / "config.toml")
-    assert config.resolve(config.detector.model) == root / "models/yolov8s-worldv2.pt"
-    assert "banknotes" in config.detector.prompts
+    assert config.resolve(config.detector.model) == root / "models/cash-yolo26m.pt"
+    assert config.detector.backend == "trained"
 
 
 def test_paths_resolve_against_config_file_not_working_directory(tmp_path, monkeypatch):
@@ -24,7 +24,7 @@ def test_paths_resolve_against_config_file_not_working_directory(tmp_path, monke
 
 
 @pytest.mark.parametrize("value", [-0.1, 1.1, "high", True, float("nan")])
-@pytest.mark.parametrize("field", ["confidence", "trained_confidence"])
+@pytest.mark.parametrize("field", ["confidence"])
 def test_rejects_invalid_confidence(value, field, tmp_path):
     config = AppConfig(root=tmp_path)
     config = replace(config, detector=replace(config.detector, **{field: value}))

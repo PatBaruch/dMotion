@@ -50,7 +50,7 @@ def test_batch_labels_only_pending_records_and_keeps_empty_results_pending(tmp_p
         records.append(dataset.add_image(source, group="one-video", width=100, height=80))
     dataset.review(records[0]["id"], status="negative", boxes=[])
     original = dataset.get_record(records[0]["id"])
-    checkpoint = tmp_path / "models" / "yolov8s-worldv2.pt"
+    checkpoint = tmp_path / "models" / "cash-yolo26m.pt"
     checkpoint.parent.mkdir()
     checkpoint.write_bytes(b"test detector weights")
     results = iter([[Detection((-2, 10, 90, 70), 0.75, "paper money")], []])
@@ -106,4 +106,27 @@ def test_source_tampering_stops_before_creating_a_suggestion(tmp_path, monkeypat
     before = dataset.manifest_path.read_bytes()
     with pytest.raises(ValueError, match="changed since import"):
         auto_label(config, dataset.directory, output=tmp_path / "output")
+    assert dataset.manifest_path.read_bytes() == before
+
+
+def test_existing_pending_draft_is_preserved_without_loading_model(tmp_path, monkeypatch):
+    dataset = Dataset(tmp_path / "dataset")
+    image = tmp_path / "draft.jpg"
+    image.write_bytes(b"image")
+    record = dataset.add_image(image, group="session", width=100, height=80)
+    dataset.suggest(
+        record["id"],
+        {
+            "boxes": [],
+            "scores": [],
+            "labels": [],
+            "model": "old-model",
+            "created_at": "2026-10-06T00:00:00+00:00",
+            "prompts": ["cash"],
+        },
+    )
+    before = dataset.manifest_path.read_bytes()
+    monkeypatch.setitem(sys.modules, "cv2", None)
+    with pytest.raises(ValueError, match="No unreviewed pictures"):
+        auto_label(AppConfig(root=tmp_path), dataset.directory)
     assert dataset.manifest_path.read_bytes() == before
