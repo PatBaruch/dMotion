@@ -26,7 +26,7 @@ Start with [README](../README.md) for setup, commands and the supported YOLO26m 
 | `data/training/images/`, `manifest.json` | Dataset-owned images, explicit review decisions and groups |
 | `data/yolo/` | Grouped train/val/test export; preserve it before rebuilding |
 | `outputs/yolo26m-training/` | Unique training runs, candidate weights and reports |
-| `outputs/video-autolabel/` | Draft predictions and review contact sheets |
+| `outputs/video-autolabel/` | Draft predictions, current `report.json`, and its immutable sheet set under `contact-sheets/` |
 | `outputs/media-imports/` | Checksum/path-move journals |
 | `outputs/` | Other evaluation evidence, external/Colab candidates and photo previews |
 

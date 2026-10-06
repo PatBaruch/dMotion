@@ -1,6 +1,7 @@
 import json
 import sys
 from dataclasses import replace
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -204,12 +205,15 @@ def test_interrupted_labeling_resumes_complete_audit_without_replacing_drafts(
         assert calls.count("load") == 1
 
 
-@pytest.mark.parametrize("failure_stage", [None, "render", "report"])
+@pytest.mark.parametrize("record_count", [13, 15])
+@pytest.mark.parametrize(
+    "failure_stage", [None, "render", "partial_render", "report", "after_commit"]
+)
 def test_saved_draft_rebuild_prunes_pages_only_after_committing_the_report(
-    tmp_path, monkeypatch, failure_stage
+    tmp_path, monkeypatch, failure_stage, record_count
 ):
     dataset = Dataset(tmp_path / "dataset")
-    for index in range(13):
+    for index in range(record_count):
         image = tmp_path / f"frame-{index}.jpg"
         image.write_bytes(f"image {index}".encode())
         record = dataset.add_image(image, group="session", width=100, height=80)
@@ -225,12 +229,16 @@ def test_saved_draft_rebuild_prunes_pages_only_after_committing_the_report(
             },
         )
 
+    state = {"rebuilding": False}
+
     def render(dataset, records, output):
         paths = []
         for page, offset in enumerate(range(0, len(records), 12), start=1):
             path = output / f"contact-sheet-{page:02}.jpg"
             path.write_text("\n".join(record["id"] for record in records[offset : offset + 12]))
             paths.append(str(path))
+            if state["rebuilding"] and failure_stage == "partial_render" and page == 1:
+                raise RuntimeError("partial render interrupted")
         return paths
 
     monkeypatch.setitem(sys.modules, "cv2", None)
@@ -238,24 +246,35 @@ def test_saved_draft_rebuild_prunes_pages_only_after_committing_the_report(
     config = AppConfig(root=tmp_path)
     report = auto_label(config, dataset.directory)
     output = report.parent
-    obsolete = output / "contact-sheet-02.jpg"
+    old_report = report.read_bytes()
+    original_sheets = {
+        Path(path): Path(path).read_bytes() for path in json.loads(old_report)["contact_sheets"]
+    }
+    obsolete = next(path for path in original_sheets if path.name == "contact-sheet-02.jpg")
     assert obsolete.is_file()
+    legacy = output / "contact-sheet-99.jpg"
+    legacy.write_bytes(b"legacy generated page")
     notes = output / "contact-sheet-notes.jpg"
     notes.write_bytes(b"user notes")
+    generation_notes = obsolete.parent / "review-notes.txt"
+    generation_notes.write_bytes(b"generation notes")
     reviewed = dataset.records()[:2]
     for record in reviewed:
         dataset.review(record["id"], status="negative", boxes=[])
     manifest = dataset.manifest_path.read_bytes()
+    state["rebuilding"] = True
     if failure_stage == "render":
 
         def fail(*args):
             raise RuntimeError("render interrupted")
 
         monkeypatch.setattr("dmotion.autolabel._contact_sheets", fail)
-    elif failure_stage == "report":
+    elif failure_stage in {"report", "after_commit"}:
 
         def write(path, value):
             if path.name == "report.json":
+                if failure_stage == "after_commit":
+                    _write_json(path, value)
                 raise RuntimeError("report interrupted")
             _write_json(path, value)
 
@@ -264,13 +283,35 @@ def test_saved_draft_rebuild_prunes_pages_only_after_committing_the_report(
         with pytest.raises(RuntimeError, match="interrupted"):
             auto_label(config, dataset.directory)
         assert obsolete.is_file()
-        assert json.loads(report.read_text())["frames"] == 13
+        if failure_stage == "after_commit":
+            committed = json.loads(report.read_text())
+            assert committed["frames"] == record_count - 2
+            assert all(Path(path).is_file() for path in committed["contact_sheets"])
+        else:
+            assert report.read_bytes() == old_report
+        assert all(path.read_bytes() == content for path, content in original_sheets.items())
+        assert legacy.exists()
+        # A later successful rebuild retires both the old set and any complete
+        # generation left unreferenced by an interrupted report publication.
+        monkeypatch.setattr("dmotion.autolabel._contact_sheets", render)
+        monkeypatch.setattr("dmotion.autolabel._write_json", _write_json)
+        state["rebuilding"] = False
+        recovered = json.loads(auto_label(config, dataset.directory).read_text())
+        assert set((output / "contact-sheets").glob("*/contact-sheet-*.jpg")) == {
+            Path(path) for path in recovered["contact_sheets"]
+        }
+        assert not legacy.exists()
     else:
         summary = json.loads(auto_label(config, dataset.directory).read_text())
-        assert summary["frames"] == summary["preserved_frames"] == 11
-        assert summary["contact_sheets"] == [str(output / "contact-sheet-01.jpg")]
+        assert summary["frames"] == summary["preserved_frames"] == record_count - 2
+        assert len(summary["contact_sheets"]) == (record_count - 2 + 11) // 12
+        current = Path(summary["contact_sheets"][0])
+        assert current.name == "contact-sheet-01.jpg"
+        assert current.parent.parent == output / "contact-sheets"
         assert not obsolete.exists()
-        sheet = (output / "contact-sheet-01.jpg").read_text()
+        assert not legacy.exists()
+        sheet = "\n".join(Path(path).read_text() for path in summary["contact_sheets"])
         assert all(record["id"] not in sheet for record in reviewed)
     assert notes.read_bytes() == b"user notes"
+    assert generation_notes.read_bytes() == b"generation notes"
     assert dataset.manifest_path.read_bytes() == manifest
