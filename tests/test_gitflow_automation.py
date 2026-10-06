@@ -165,14 +165,49 @@ def completion(**changes):
     }
 
 
-def test_native_clean_comment_binds_unambiguous_pr_commit_and_reaches_merge_gate():
+@pytest.mark.parametrize(
+    "suffix",
+    [
+        "",
+        " Swish!",
+        " Already looking forward to the next diff.",
+        " What shall we delve into next?",
+    ],
+)
+def test_native_clean_comment_binds_unambiguous_pr_commit_and_reaches_merge_gate(suffix):
     commits = [{"sha": SHA}, {"sha": BASE}]
-    assert flow.review_verdict(SHA, [], [], [completion()], commits)[0]
+    comment = completion(body=completion()["body"].replace(" Swish!", suffix))
+    assert flow.review_verdict(SHA, [], [], [comment], commits)[0]
     client = inspection_client()
     client.routes["GET", "pulls/7/reviews"] = []
-    client.routes["GET", "issues/7/comments"] = [completion()]
+    client.routes["GET", "issues/7/comments"] = [comment]
     assert flow.inspect_pr(client, 7)["review_ok"]
     assert flow.merge_pr(client, 7)["merged"]
+
+
+@pytest.mark.parametrize(
+    "suffix",
+    ["[P1] Fix this", " [P0] Fix this", " Review was not completed", " quota exhausted"],
+)
+def test_clean_prefix_with_unsuccessful_or_blocking_suffix_cannot_pass(suffix):
+    comment = completion(body=completion()["body"].replace(" Swish!", suffix))
+    assert not flow.review_verdict(SHA, [], [], [comment], [{"sha": SHA}])[0]
+
+
+@pytest.mark.parametrize(
+    "first_line",
+    [
+        "Quoted: Codex Review: Didn't find any major issues.",
+        "> Codex Review: Didn't find any major issues.",
+        "Codex Review: Didn't find any major issues",
+        "Codex Review: Didn't find any major issues.Swish!",
+    ],
+)
+def test_clean_result_requires_exact_sentence_and_suffix_boundary(first_line):
+    body = completion()["body"].replace(
+        "Codex Review: Didn't find any major issues. Swish!", first_line
+    )
+    assert not flow.review_verdict(SHA, [], [], [completion(body=body)], [{"sha": SHA}])[0]
 
 
 def test_incomplete_commit_history_blocks_inspection_before_merge():
