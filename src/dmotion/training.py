@@ -1,4 +1,4 @@
-"""Bounded local fine-tuning, followed by evaluation on untouched session groups."""
+"""Bounded YOLO26m training; save a candidate without replacing the live checkpoint."""
 
 import hashlib
 import json
@@ -16,18 +16,7 @@ from dmotion.dataset import Dataset, _write_json, export_dataset
 from dmotion.detector import prepare_environment, select_device
 
 logger = logging.getLogger(__name__)
-
-
-def _numeric_metrics(result) -> dict[str, float]:
-    metrics = {}
-    for key, value in getattr(result, "results_dict", {}).items():
-        try:
-            numeric = float(value)
-        except (TypeError, ValueError):
-            continue
-        if math.isfinite(numeric):
-            metrics[str(key)] = numeric
-    return metrics
+MODEL_ID = "yolo26m.pt"
 
 
 def train_model(
@@ -38,6 +27,7 @@ def train_model(
     patience: int = 10,
     image_size: int = 640,
     device: str = "auto",
+    batch: int = 2,
 ) -> Path:
     if type(epochs) is not int or not 1 <= epochs <= 500:
         raise ValueError("Training epochs must be an integer between 1 and 500")
@@ -47,6 +37,8 @@ def train_model(
         raise ValueError("Training image size must be a positive multiple of 32")
     if not isinstance(device, str) or not device.strip():
         raise ValueError("Training device must be auto, cpu, mps, or a CUDA device")
+    if type(batch) is not int or not 1 <= batch <= 64:
+        raise ValueError("Training batch must be an integer between 1 and 64")
     dataset = Dataset(dataset_directory)
     pending = dataset.summary()["ai_suggested"]
     if pending:
@@ -66,12 +58,14 @@ def train_model(
     settings.update({"sync": False})
     selected_device = select_device(device, torch)
     timestamp = datetime.now(UTC)
-    run_name = timestamp.strftime("spread-%Y%m%d-%H%M%S-") + uuid4().hex[:6]
-    project = config.root / "outputs" / "training"
-    pretrained_path = config.root / "models" / "yolo26n.pt"
+    run_name = timestamp.strftime("cash-%Y%m%d-%H%M%S-") + uuid4().hex[:6]
+    project = config.root / "outputs" / "yolo26m-training"
+    pretrained_path = config.root / "models" / MODEL_ID
     pretrained_path.parent.mkdir(parents=True, exist_ok=True)
-    logger.info("Training reviewed spreads on %s; run %s", selected_device, run_name)
+    logger.info("Training reviewed cash on %s; run %s", selected_device, run_name)
     model = YOLO(str(pretrained_path))
+    with pretrained_path.open("rb") as source:
+        pretrained_sha256 = hashlib.file_digest(source, "sha256").hexdigest()
     updates = {"optimizer_steps": 0, "positive_lr_optimizer_steps": 0}
     step_hooks = []
 
@@ -94,8 +88,8 @@ def train_model(
             epochs=epochs,
             imgsz=image_size,
             device=selected_device,
-            batch=4,
-            nbs=4,  # Avoid accumulating many epochs before an update on small datasets.
+            batch=batch,
+            nbs=batch,  # Avoid accumulating many epochs before an update on small datasets.
             workers=0,
             patience=patience,
             pretrained=True,
@@ -121,22 +115,8 @@ def train_model(
     best = Path(model.trainer.best)
     if not best.is_file():
         raise RuntimeError("Training finished without a best model checkpoint")
-    # Evaluation never uses the training or validation sessions.
-    evaluation = YOLO(str(best)).val(
-        data=str(data_path),
-        split="test",
-        imgsz=image_size,
-        device=selected_device,
-        batch=4,
-        workers=0,
-        project=str(project),
-        name=f"{run_name}-test",
-        exist_ok=False,
-        plots=False,
-        verbose=False,
-    )
-    destination = config.root / "models" / "money-spread.pt"
-    descriptor, temporary = tempfile.mkstemp(prefix=".money-spread-", dir=destination.parent)
+    destination = project / run_name / "candidate.pt"
+    descriptor, temporary = tempfile.mkstemp(prefix=".cash-candidate-", dir=destination.parent)
     os.close(descriptor)
     try:
         shutil.copyfile(best, temporary)
@@ -145,6 +125,11 @@ def train_model(
         Path(temporary).unlink(missing_ok=True)
     info = {
         "version": 1,
+        "model_id": MODEL_ID,
+        "model_revision": f"sha256:{pretrained_sha256}",
+        "pretrained_sha256": pretrained_sha256,
+        "batch": batch,
+        "active_model_replaced": False,
         "created_at": timestamp.isoformat(),
         "run": run_name,
         "pretrained": str(pretrained_path),
@@ -160,11 +145,11 @@ def train_model(
         "device": selected_device,
         "splits": export_report["splits"],
         "warnings": export_report["warnings"],
-        "test_metrics": _numeric_metrics(evaluation),
-        "evaluation_note": "Test images come from groups not used to fit or select this model.",
+        "test_evaluated": False,
+        "evaluation_note": "Calibrate on validation; evaluate test once after freezing confidence.",
     }
     _write_json(project / run_name / "dataset-provenance.json", export_report)
     _write_json(project / run_name / "training-info.json", info)
     _write_json(destination.with_suffix(".json"), info)
-    logger.info("Trained model saved to %s; test metrics: %s", destination, info["test_metrics"])
+    logger.info("YOLO26m candidate saved to %s; live checkpoint unchanged", destination)
     return destination

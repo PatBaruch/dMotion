@@ -14,9 +14,10 @@ def test_help_does_not_import_vision_dependencies():
     assert not ({"torch", "ultralytics", "cv2", "pygame"} & (set(sys.modules) - before))
 
 
-def test_repeated_prompts_are_supported():
-    args = parser().parse_args(["run", "--prompt", "banknotes", "--prompt", "cash"])
-    assert args.prompt == ["banknotes", "cash"]
+@pytest.mark.parametrize("flag", ["--prompt", "--reference", "--engine"])
+def test_retired_model_options_are_not_available(flag):
+    with pytest.raises(SystemExit):
+        parser().parse_args(["run", flag, "unused"])
 
 
 @pytest.mark.parametrize("arguments", [["--confidence", "1.5"], ["--image-size", "641"]])
@@ -28,11 +29,11 @@ def test_missing_config_produces_failure(tmp_path):
     assert main(["doctor", "--config", str(tmp_path / "missing.toml")]) == 1
 
 
-def test_check_mode_reaches_camera_with_user_overrides(monkeypatch):
+def test_selected_checkpoint_reaches_camera_with_user_overrides(monkeypatch):
     received = {}
 
-    def camera(config, *, demo, checking):
-        received.update(config=config, demo=demo, checking=checking)
+    def camera(config, *, demo):
+        received.update(config=config, demo=demo)
         return 0
 
     monkeypatch.setitem(
@@ -43,7 +44,9 @@ def test_check_mode_reaches_camera_with_user_overrides(monkeypatch):
             [
                 "run",
                 "--mode",
-                "check",
+                "trained",
+                "--model",
+                "candidate.pt",
                 "--confidence",
                 "0.1",
                 "--image-size",
@@ -55,9 +58,8 @@ def test_check_mode_reaches_camera_with_user_overrides(monkeypatch):
         )
         == 0
     )
-    assert received["checking"] is True
     assert received["demo"] is False
-    assert "person" in received["config"].detector.prompts
+    assert received["config"].detector.model == "candidate.pt"
     assert received["config"].detector.confidence == 0.1
     assert received["config"].detector.image_size == 640
     assert received["config"].camera.index == 1
@@ -80,8 +82,8 @@ def test_collect_success_returns_zero_even_when_multiple_frames_saved(monkeypatc
 def test_trained_mode_uses_custom_backend(monkeypatch):
     received = {}
 
-    def camera(config, *, demo, checking):
-        received.update(config=config, checking=checking)
+    def camera(config, *, demo):
+        received.update(config=config)
         return 0
 
     monkeypatch.setitem(
@@ -89,13 +91,12 @@ def test_trained_mode_uses_custom_backend(monkeypatch):
     )
     assert main(["run", "--mode", "trained"]) == 0
     assert received["config"].detector.backend == "trained"
-    assert received["checking"] is False
 
 
 def test_trained_mode_confidence_can_be_overridden(monkeypatch):
     received = {}
 
-    def camera(config, *, demo, checking):
+    def camera(config, *, demo):
         received.update(config=config)
         return 0
 
