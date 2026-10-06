@@ -177,6 +177,7 @@ def completion(**changes):
         " Already looking forward to the next diff.",
         " What shall we delve into next?",
         " Another round soon, please!",
+        " Chef's kiss.",
     ],
 )
 def test_native_clean_comment_binds_unambiguous_pr_commit_and_reaches_merge_gate(suffix):
