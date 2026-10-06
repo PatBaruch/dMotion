@@ -182,7 +182,7 @@ Existing native comments remain a strict compatibility path. They require the
 exact first-line clean sentence `Codex Review: Didn't find any major issues.`,
 a known observed decorative closing (or none), one `Reviewed commit` marker,
 and only an optional observed footer. Unknown prose anywhere fails closed.
-The recognized closings are `Swish!`, `:tada:`, `Keep it up!`, `You're on a roll.`,
+The recognized closings are `Swish!`, `Bravo.`, `:tada:`, `Keep it up!`, `You're on a roll.`,
 `Chef's kiss.`, `Another round soon, please!`, `Already looking forward to the next diff.`, and
 `What shall we delve into next?`. Failure messages and P0/P1 findings anywhere
 block both formats. New integrations should use the JSON contract.

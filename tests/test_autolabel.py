@@ -50,7 +50,7 @@ def test_batch_labels_only_pending_records_and_keeps_empty_results_pending(tmp_p
         records.append(dataset.add_image(source, group="one-video", width=100, height=80))
     dataset.review(records[0]["id"], status="negative", boxes=[])
     original = dataset.get_record(records[0]["id"])
-    checkpoint = tmp_path / "models" / "yolov8s-worldv2.pt"
+    checkpoint = tmp_path / "models" / "cash-yolo26m.pt"
     checkpoint.parent.mkdir()
     checkpoint.write_bytes(b"test detector weights")
     results = iter([[Detection((-2, 10, 90, 70), 0.75, "paper money")], []])
@@ -107,3 +107,98 @@ def test_source_tampering_stops_before_creating_a_suggestion(tmp_path, monkeypat
     with pytest.raises(ValueError, match="changed since import"):
         auto_label(config, dataset.directory, output=tmp_path / "output")
     assert dataset.manifest_path.read_bytes() == before
+
+
+def test_existing_pending_draft_is_preserved_without_loading_model(tmp_path, monkeypatch):
+    dataset = Dataset(tmp_path / "dataset")
+    image = tmp_path / "draft.jpg"
+    image.write_bytes(b"image")
+    record = dataset.add_image(image, group="session", width=100, height=80)
+    dataset.suggest(
+        record["id"],
+        {
+            "boxes": [],
+            "scores": [],
+            "labels": [],
+            "model": "old-model",
+            "created_at": "2026-10-06T00:00:00+00:00",
+            "prompts": ["cash"],
+        },
+    )
+    before = dataset.manifest_path.read_bytes()
+    monkeypatch.setitem(sys.modules, "cv2", None)
+    monkeypatch.setattr("dmotion.autolabel._contact_sheets", lambda *args: [])
+    report = auto_label(AppConfig(root=tmp_path), dataset.directory)
+    summary = json.loads(report.read_text())
+    assert summary["frames"] == summary["preserved_frames"] == 1
+    assert summary["new_frames"] == 0
+    assert summary["models"] == [
+        {"model": "old-model", "model_sha256": None, "model_revision": None}
+    ]
+    predictions = json.loads(report.with_name("predictions.json").read_text())
+    assert predictions["records"][0]["suggestion"]["model"] == "old-model"
+    assert dataset.manifest_path.read_bytes() == before
+
+
+@pytest.mark.parametrize("stage", ["during_inference", "before_report"])
+def test_interrupted_labeling_resumes_complete_audit_without_replacing_drafts(
+    tmp_path, monkeypatch, stage
+):
+    dataset = Dataset(tmp_path / "dataset")
+    for index in range(2):
+        image = tmp_path / f"frame-{index}.jpg"
+        image.write_bytes(f"image {index}".encode())
+        dataset.add_image(image, group="session", width=100, height=80)
+    checkpoint = tmp_path / "models/cash-yolo26m.pt"
+    checkpoint.parent.mkdir()
+    checkpoint.write_bytes(b"checkpoint")
+    calls = []
+    state = {"fail": True}
+
+    class Detector:
+        device = "cpu"
+
+        def __init__(self, config):
+            calls.append("load")
+
+        def predict(self, frame):
+            calls.append("predict")
+            if stage == "during_inference" and state["fail"] and calls.count("predict") == 2:
+                raise RuntimeError("interrupted")
+            return [Detection((10, 10, 90, 70), 0.8, "cash")]
+
+    sheets = []
+
+    def contact_sheets(dataset, records, output):
+        if stage == "before_report" and state["fail"]:
+            raise RuntimeError("interrupted")
+        sheets.extend(record["id"] for record in records)
+        return []
+
+    monkeypatch.setitem(
+        sys.modules, "cv2", SimpleNamespace(imread=lambda _: SimpleNamespace(shape=(80, 100, 3)))
+    )
+    monkeypatch.setattr("dmotion.autolabel.MoneyDetector", Detector)
+    monkeypatch.setattr("dmotion.autolabel._contact_sheets", contact_sheets)
+    config = AppConfig(root=tmp_path)
+    with pytest.raises(RuntimeError, match="interrupted"):
+        auto_label(config, dataset.directory)
+    saved = {
+        record["id"]: record["suggestion"] for record in dataset.records() if "suggestion" in record
+    }
+    state["fail"] = False
+    if stage == "before_report":
+        # Regenerate artifacts after every draft is saved, even with no model available.
+        checkpoint.unlink()
+        monkeypatch.setitem(sys.modules, "cv2", None)
+    report = auto_label(config, dataset.directory)
+    info = json.loads(report.read_text())
+    predictions = json.loads(report.with_name("predictions.json").read_text())["records"]
+    assert info["frames"] == info["boxes"] == 2
+    assert info["preserved_frames"] == len(saved)
+    assert len(predictions) == len(sheets) == 2
+    assert set(sheets) == {record["id"] for record in dataset.records()}
+    assert all(record["status"] == "unreviewed" and not record["boxes"] for record in predictions)
+    assert all(dataset.get_record(key)["suggestion"] == value for key, value in saved.items())
+    if stage == "before_report":
+        assert calls.count("load") == 1

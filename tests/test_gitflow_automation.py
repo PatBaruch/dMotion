@@ -173,6 +173,7 @@ def completion(**changes):
     [
         "",
         " Swish!",
+        " Bravo.",
         " :tada:",
         " Keep it up!",
         " You're on a roll.",
@@ -204,6 +205,7 @@ def test_native_clean_comment_binds_unambiguous_pr_commit_and_reaches_merge_gate
         " I did not finish checking the diff",
         " Unknown closing.",
         " Already looking forward to the next diff. Review ended early",
+        " Bravo. Review ended early",
     ],
 )
 def test_clean_prefix_with_unsuccessful_or_blocking_suffix_cannot_pass(suffix):

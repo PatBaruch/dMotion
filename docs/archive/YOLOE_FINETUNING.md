@@ -1,3 +1,5 @@
+> Historical experiment, retained for provenance. The supported workflow is YOLO26m; see [README](../../README.md).
+
 # Fine-tuning the existing YOLOE checkpoint
 
 The current local reference detector uses `models/yoloe-26s-seg.pt`, seeded with

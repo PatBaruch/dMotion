@@ -2,20 +2,16 @@
 
 import math
 import tomllib
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
 from pathlib import Path
 
 
 @dataclass(frozen=True)
 class DetectorConfig:
-    model: str = "models/yolov8s-worldv2.pt"
-    backend: str = "world"
-    prompts: tuple[str, ...] = ("a fan of banknotes", "banknotes", "cash money")
-    confidence: float = 0.25
-    # Trained-mode confidence is calibrated separately from the experimental
-    # text-prompt detector.  CLI --confidence still overrides it for a run.
-    trained_confidence: float = 0.175
-    image_size: int = 416
+    model: str = "models/cash-yolo26m.pt"
+    backend: str = "trained"
+    confidence: float = 0.55
+    image_size: int = 640
     device: str = "auto"
 
 
@@ -60,41 +56,11 @@ class AppConfig:
         return (self.root / Path(path).expanduser()).resolve()
 
 
-CHECK_PROMPTS = ("person", "cell phone", "cup", "bottle", "book")
-
-
 def apply_mode(config: AppConfig, mode: str) -> AppConfig:
-    """Use familiar objects to check real inference, independently of cash recognition."""
-    if mode == "money":
+    """Retain old cash-mode aliases without replacing the configured checkpoint."""
+    if mode in {"money", "trained"}:
         return config
-    if mode == "check":
-        return replace(
-            config,
-            detector=replace(
-                config.detector,
-                model=(
-                    DetectorConfig().model
-                    if config.detector.backend == "trained"
-                    else config.detector.model
-                ),
-                backend="world",
-                prompts=CHECK_PROMPTS,
-                confidence=0.25,
-            ),
-            trigger=replace(config.trigger, consecutive_hits=1),
-        )
-    if mode == "trained":
-        return replace(
-            config,
-            detector=replace(
-                config.detector,
-                model="models/money-spread.pt",
-                backend="trained",
-                image_size=640,
-                confidence=config.detector.trained_confidence,
-            ),
-        )
-    raise ValueError(f"Unknown detection mode: {mode}")
+    raise ValueError(f"Retired detection mode: {mode}. Use a trained YOLO26m cash checkpoint.")
 
 
 def _number(value: object, name: str, minimum: float, maximum: float = math.inf) -> None:
@@ -118,12 +84,9 @@ def validate(config: AppConfig) -> AppConfig:
         raise ValueError("detector.model must be a nonempty path")
     if not isinstance(d.device, str) or not d.device.strip():
         raise ValueError("detector.device must be a nonempty string")
-    if not isinstance(d.backend, str) or d.backend not in {"world", "trained"}:
-        raise ValueError("detector.backend must be world or trained")
-    if not d.prompts or any(not isinstance(p, str) or not p.strip() for p in d.prompts):
-        raise ValueError("detector.prompts must contain nonempty strings")
+    if d.backend != "trained":
+        raise ValueError("detector.backend must be trained; prompt/reference models are retired")
     _number(d.confidence, "detector.confidence", 0.0, 1.0)
-    _number(d.trained_confidence, "detector.trained_confidence", 0.0, 1.0)
     _integer(d.image_size, "detector.image_size", 32)
     if d.image_size % 32:
         raise ValueError("detector.image_size must be a multiple of 32")
@@ -166,10 +129,6 @@ def load_config(path: Path) -> AppConfig:
         settings = raw.get(name, {})
         if not isinstance(settings, dict):
             raise ValueError(f"{name} must be a TOML table")
-        if name == "detector" and "prompts" in settings:
-            if not isinstance(settings["prompts"], list):
-                raise ValueError("detector.prompts must be an array of strings")
-            settings["prompts"] = tuple(settings["prompts"])
         try:
             values[name] = cls(**settings)
         except TypeError as exc:

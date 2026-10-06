@@ -30,7 +30,7 @@ is bug-free, that the detector is accurate, or that an AI reviewer found every b
 | pytest | Core behavior on Linux and macOS, Python 3.11, 3.12, and 3.13; each test has a 60-second timeout | JUnit XML |
 | Coverage | Lines and branches in application code and Python workflow scripts; minimum 65% | Coverage XML and JSON with uncovered paths |
 | Bandit | Python source and workflow scripts; medium/high findings fail | JSON report |
-| Dependency audit | Every registry name/version in `uv.lock`, including optional vision/labeling and alternate platform versions; any known vulnerability or collection error fails | Audit JSON and explicit scope inventory |
+| Dependency audit | Every registry name/version in `uv.lock`, including optional vision and alternate platform versions; any known vulnerability or collection error fails | Audit JSON and explicit scope inventory |
 | CodeQL | Python and GitHub Actions, extended security queries; scores at least 7.0 or error-level findings fail | SARIF and GitHub Security alerts |
 | Distribution | Locked build tools build a wheel and source archive; wheel installs into a fresh environment with hashed, locked core dependencies; CLI help/version work outside the source tree | Distribution files and SHA-256 checksums |
 | PR policy | Gitflow destination, useful title, and four completed documentation sections | `pr-policy` result |
@@ -41,8 +41,11 @@ production software. Camera/UI paths are currently poorly covered and remain
 visible in the report. Increase meaningful coverage over time; do not hide
 uncovered application code or lower the threshold to make a feature pass.
 
-The dependency service cannot audit the pinned Git snapshot of Ultralytics CLIP
-as a registry release. That exclusion is explicitly recorded with its source;
+The current YOLO26m workflow removes the CLIP Git dependency, Transformers and
+Grounding DINO integration. The following records the earlier audit work.
+
+Historically, the dependency service could not audit the pinned Git snapshot of Ultralytics CLIP
+as a registry release. That former exclusion was explicitly recorded with its source;
 the model files and Git dependency still need provenance/security review.
 An advisory scan reports known published vulnerabilities, not all vulnerabilities.
 

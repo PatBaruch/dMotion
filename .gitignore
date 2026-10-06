@@ -29,3 +29,6 @@ runs/
 .coverage*
 reports/
 .package-smoke/
+
+# Retired text encoders must never enter a commit.
+mobileclip*.ts
