@@ -173,6 +173,7 @@ def completion(**changes):
         " Swish!",
         " :tada:",
         " Keep it up!",
+        " You're on a roll.",
         " Already looking forward to the next diff.",
         " What shall we delve into next?",
     ],

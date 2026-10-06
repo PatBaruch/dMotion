@@ -138,6 +138,7 @@ observed `Codex Review: Didn't find any major issues.` result with an explicit
 `Reviewed commit` is accepted from that same verified bot.
 The clean-result sentence must start the first line exactly. Only these observed
 decorative closings are allowed after it: `Swish!`, `:tada:`, `Keep it up!`,
+`You're on a roll.`,
 `Already looking forward to the next diff.`, or `What shall we delve into next?`.
 Unknown endings fail closed because they could qualify an incomplete review.
 The rest of the message must contain only the reviewed-commit marker and an
