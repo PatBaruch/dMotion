@@ -265,7 +265,7 @@ def is_activity_comment(body: str) -> bool:
 def is_schema_result(body: str) -> bool:
     return (
         "<!-- dmotion-review-result:" in body
-        or "```json" in body
+        or "```json" in body.lower()
         or bool(
             re.search(
                 r'"(?:schema_version|reviewed_commit|status|conclusion|blocking_findings)"\s*:',
@@ -360,7 +360,17 @@ def validate_formal_review(sha: str, review: dict) -> tuple[bool, str]:
         return False, "Blocking findings remain in the current review summary"
     if is_schema_result(body):
         return validate_structured_completion(sha, body)
-    if review["state"] == "COMMENTED" and "codex review" not in body.lower():
+    if review["state"] == "APPROVED" and not body.strip():
+        return True, f"Codex approval {review['id']} covers {sha}; no unresolved blockers"
+    # Recognize the entire observed native formal-review envelope. A heading
+    # alone cannot turn arbitrary malformed JSON or incomplete prose into a
+    # completed review, regardless of Markdown fence spelling.
+    match = re.fullmatch(
+        r"### 💡 Codex Review Here are some automated review suggestions for this pull request\. "
+        r"\*\*Reviewed commit:\*\* `([0-9a-f]{10,40})` (.*)",
+        " ".join(body.split()),
+    )
+    if not match or not sha.startswith(match[1]) or match[2] != COMPLETION_FOOTER:
         return False, "Unrecognized Codex completion; an explicit reviewed result is required"
     return True, f"Codex review {review['id']} covers {sha}; no unresolved blockers"
 

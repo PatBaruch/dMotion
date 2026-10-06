@@ -23,7 +23,9 @@ def review(**changes):
         "state": "COMMENTED",
         "submitted_at": "2026-10-04T12:00:00Z",
         "updated_at": changes.get("submitted_at", "2026-10-04T12:00:00Z"),
-        "body": "Codex Review: no blocking findings.",
+        "body": json.loads(
+            (Path(__file__).parent / "fixtures/codex_formal_review.json").read_text()
+        )["body"].replace("3985630a63", SHA[:10]),
         **changes,
     }
 
@@ -403,8 +405,27 @@ def test_activity_marker_cannot_hide_malformed_or_failed_review_result(body):
 
 
 @pytest.mark.parametrize("payload", ["{}", "{", "[]"])
-def test_malformed_markerless_json_formal_body_cannot_use_legacy_review_header(payload):
-    body = "Codex Review\n```json\n" + payload + "\n```"
+@pytest.mark.parametrize("fence", ["```json", "```JSON", "```Json", "~~~JSON", "```", ""])
+@pytest.mark.parametrize("state", ["COMMENTED", "APPROVED"])
+def test_malformed_markerless_json_formal_body_cannot_use_legacy_review_header(
+    payload, fence, state
+):
+    body = "Codex Review\n" + fence + "\n" + payload + "\n```"
+    assert not flow.review_verdict(SHA, [review(body=body, state=state)], [])[0]
+
+
+@pytest.mark.parametrize(
+    "transform",
+    [
+        lambda body: body + "\nReview ended early",
+        lambda body: body.replace("</details>", "I did not finish checking the diff\n</details>"),
+        lambda body: body.replace(SHA[:10], BASE[:10]),
+        lambda body: "Codex Review: no blocking findings.",
+        lambda body: "Codex Review: I did not finish checking the diff",
+    ],
+)
+def test_formal_review_requires_the_whole_native_envelope(transform):
+    body = transform(review()["body"])
     assert not flow.review_verdict(SHA, [review(body=body)], [])[0]
 
 
