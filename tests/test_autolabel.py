@@ -7,7 +7,7 @@ import pytest
 
 from dmotion.autolabel import _draft_boxes, auto_label
 from dmotion.config import AppConfig
-from dmotion.dataset import Dataset
+from dmotion.dataset import Dataset, _write_json
 from dmotion.detector import Detection
 
 
@@ -202,3 +202,75 @@ def test_interrupted_labeling_resumes_complete_audit_without_replacing_drafts(
     assert all(dataset.get_record(key)["suggestion"] == value for key, value in saved.items())
     if stage == "before_report":
         assert calls.count("load") == 1
+
+
+@pytest.mark.parametrize("failure_stage", [None, "render", "report"])
+def test_saved_draft_rebuild_prunes_pages_only_after_committing_the_report(
+    tmp_path, monkeypatch, failure_stage
+):
+    dataset = Dataset(tmp_path / "dataset")
+    for index in range(13):
+        image = tmp_path / f"frame-{index}.jpg"
+        image.write_bytes(f"image {index}".encode())
+        record = dataset.add_image(image, group="session", width=100, height=80)
+        dataset.suggest(
+            record["id"],
+            {
+                "boxes": [],
+                "scores": [],
+                "labels": [],
+                "model": "saved-cash-model",
+                "created_at": "2026-10-06T00:00:00+00:00",
+                "prompts": ["cash"],
+            },
+        )
+
+    def render(dataset, records, output):
+        paths = []
+        for page, offset in enumerate(range(0, len(records), 12), start=1):
+            path = output / f"contact-sheet-{page:02}.jpg"
+            path.write_text("\n".join(record["id"] for record in records[offset : offset + 12]))
+            paths.append(str(path))
+        return paths
+
+    monkeypatch.setitem(sys.modules, "cv2", None)
+    monkeypatch.setattr("dmotion.autolabel._contact_sheets", render)
+    config = AppConfig(root=tmp_path)
+    report = auto_label(config, dataset.directory)
+    output = report.parent
+    obsolete = output / "contact-sheet-02.jpg"
+    assert obsolete.is_file()
+    notes = output / "contact-sheet-notes.jpg"
+    notes.write_bytes(b"user notes")
+    reviewed = dataset.records()[:2]
+    for record in reviewed:
+        dataset.review(record["id"], status="negative", boxes=[])
+    manifest = dataset.manifest_path.read_bytes()
+    if failure_stage == "render":
+
+        def fail(*args):
+            raise RuntimeError("render interrupted")
+
+        monkeypatch.setattr("dmotion.autolabel._contact_sheets", fail)
+    elif failure_stage == "report":
+
+        def write(path, value):
+            if path.name == "report.json":
+                raise RuntimeError("report interrupted")
+            _write_json(path, value)
+
+        monkeypatch.setattr("dmotion.autolabel._write_json", write)
+    if failure_stage:
+        with pytest.raises(RuntimeError, match="interrupted"):
+            auto_label(config, dataset.directory)
+        assert obsolete.is_file()
+        assert json.loads(report.read_text())["frames"] == 13
+    else:
+        summary = json.loads(auto_label(config, dataset.directory).read_text())
+        assert summary["frames"] == summary["preserved_frames"] == 11
+        assert summary["contact_sheets"] == [str(output / "contact-sheet-01.jpg")]
+        assert not obsolete.exists()
+        sheet = (output / "contact-sheet-01.jpg").read_text()
+        assert all(record["id"] not in sheet for record in reviewed)
+    assert notes.read_bytes() == b"user notes"
+    assert dataset.manifest_path.read_bytes() == manifest

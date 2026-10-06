@@ -1,6 +1,6 @@
 # dMotion
 
-[![Checks](https://github.com/PatBaruch/dMotion/actions/workflows/checks.yml/badge.svg?branch=develop)](https://github.com/PatBaruch/dMotion/actions/workflows/checks.yml)
+[![Checks](https://github.com/PatBaruch/dMotion/actions/workflows/checks.yml/badge.svg?branch=main)](https://github.com/PatBaruch/dMotion/actions/workflows/checks.yml)
 
 dMotion is a local Python app that recognizes visible cash through a webcam,
 draws a white box around it, and plays an alert. Fans of notes, stacks, and single
@@ -40,7 +40,7 @@ before setup. Internet access is needed for initial dependencies and pretrained
 weights. CUDA requires compatible GPU drivers; Apple Silicon can use MPS.
 
 ```sh
-git clone --branch develop https://github.com/PatBaruch/dMotion.git
+git clone --branch main https://github.com/PatBaruch/dMotion.git
 cd dMotion
 make setup
 make doctor
@@ -185,7 +185,9 @@ make label
 Suggestions remain drafts, including frames with no detections. Review missed
 cash as well as incorrect boxes. Existing reviewed records and pending drafts
 are preserved. Rerunning after interruption rebuilds the complete report and
-contact sheets from saved drafts without repeating their inference. Reports and contact sheets go to `outputs/video-autolabel/`.
+contact sheets from saved drafts without repeating their inference. Reports and
+contact sheets go to `outputs/video-autolabel/`. A successful rebuild removes
+obsolete numbered sheet pages after partial human review.
 No separate labeling model or text encoder is required. Training refuses pending
 AI suggestions until you explicitly choose cash, no cash, or skip.
 
