@@ -149,6 +149,7 @@ def auto_label(config: AppConfig, directory: Path, *, output: Path | None = None
     _write_json(output / "predictions.json", {"version": 1, "records": records})
     model = config.resolve(config.detector.model)
     model_digest = revision = device = None
+    new_ids = set()
     if pending:
         import cv2
 
@@ -189,7 +190,20 @@ def auto_label(config: AppConfig, directory: Path, *, output: Path | None = None
             "confidence_threshold": config.detector.confidence,
             "image_size": config.detector.image_size,
         }
-        saved = dataset.suggest(record["id"], suggestion)
+        # Check and save under one manifest lock: a labeler may have completed
+        # this queued frame while inference ran. Another saved draft also wins.
+        with dataset.locked_records() as latest:
+            current = next((item for item in latest if item["id"] == record["id"]), None)
+            if current is None:
+                raise ValueError(f"No dataset image with ID {record['id']}")
+            if current["status"] != "unreviewed":
+                logger.info("Preserved concurrent human review of %s", record["source"])
+                continue
+            if "suggestion" in current:
+                saved = current
+            else:
+                saved = dataset.suggest(record["id"], suggestion)
+                new_ids.add(record["id"])
         records.append(saved)
         # Save progress before starting another potentially expensive inference.
         _write_json(output / "predictions.json", {"version": 1, "records": records})
@@ -197,7 +211,6 @@ def auto_label(config: AppConfig, directory: Path, *, output: Path | None = None
             "%s/%s: %s — %s proposed boxes", index, len(pending), record["source"], len(boxes)
         )
     saved_ids = {record["id"] for record in records}
-    pending_ids = {record["id"] for record in pending}
     # Inference stays outside the manifest lock. Reconcile completed human reviews
     # afterward, then keep the final snapshot stable through rendering/publication.
     # Lock order is always manifest first, then the output's audit publication lock.
@@ -210,7 +223,7 @@ def auto_label(config: AppConfig, directory: Path, *, output: Path | None = None
             and "suggestion" in record
         ]
         _write_json(output / "predictions.json", {"version": 1, "records": records})
-        new_frames = sum(record["id"] in pending_ids for record in records)
+        new_frames = sum(record["id"] in new_ids for record in records)
         identities = dict.fromkeys(
             (
                 item["suggestion"].get("model"),

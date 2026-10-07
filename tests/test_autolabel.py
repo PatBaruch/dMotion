@@ -279,6 +279,71 @@ def test_publication_reconciles_late_reviews_and_locks_the_manifest(
         pass  # Publication released the manifest lock.
 
 
+@pytest.mark.parametrize("decision", ["positive", "negative", "excluded", "all", "other-draft"])
+def test_inference_preserves_a_concurrent_review_or_existing_draft(tmp_path, monkeypatch, decision):
+    dataset = Dataset(tmp_path / "dataset")
+    records = []
+    for index in range(2):
+        image = tmp_path / f"frame-{index}.jpg"
+        image.write_bytes(f"image {index}".encode())
+        records.append(dataset.add_image(image, group="session", width=100, height=80))
+    checkpoint = tmp_path / "models/cash-yolo26m.pt"
+    checkpoint.parent.mkdir()
+    checkpoint.write_bytes(b"checkpoint")
+    state = {"calls": 0}
+
+    class Detector:
+        device = "cpu"
+
+        def __init__(self, config):
+            pass
+
+        def predict(self, frame):
+            state["calls"] += 1
+            if state["calls"] == 1:
+                changed = records if decision == "all" else records[:1]
+                for record in changed:
+                    if decision == "other-draft":
+                        dataset.suggest(
+                            record["id"],
+                            {
+                                "boxes": [],
+                                "scores": [],
+                                "labels": [],
+                                "model": "other-checkpoint",
+                                "created_at": "2026-10-07T00:00:00+00:00",
+                                "prompts": ["cash"],
+                            },
+                        )
+                    else:
+                        dataset.review(
+                            record["id"],
+                            status="negative" if decision == "all" else decision,
+                            boxes=[[2, 3, 12, 13]] if decision == "positive" else [],
+                        )
+                state["preserved"] = [dataset.get_record(record["id"]) for record in changed]
+            return [Detection((10, 10, 90, 70), 0.8, "cash")]
+
+    monkeypatch.setitem(
+        sys.modules, "cv2", SimpleNamespace(imread=lambda _: SimpleNamespace(shape=(80, 100, 3)))
+    )
+    monkeypatch.setattr("dmotion.autolabel.MoneyDetector", Detector)
+    monkeypatch.setattr("dmotion.autolabel._contact_sheets", lambda *args: [])
+    report = auto_label(AppConfig(root=tmp_path), dataset.directory)
+    summary = json.loads(report.read_text())
+    expected = [] if decision == "all" else records if decision == "other-draft" else records[1:]
+    published = json.loads(report.with_name("predictions.json").read_text())["records"]
+    assert [record["id"] for record in published] == [record["id"] for record in expected]
+    assert all(record["status"] == "unreviewed" for record in published)
+    assert summary["frames"] == len(expected)
+    assert summary["new_frames"] == (0 if decision == "all" else 1)
+    assert summary["preserved_frames"] == (1 if decision == "other-draft" else 0)
+    for record in state["preserved"]:
+        assert dataset.get_record(record["id"]) == record
+    if decision == "other-draft":
+        assert published[0]["suggestion"]["model"] == "other-checkpoint"
+
+
 @pytest.mark.parametrize("stage", ["during_inference", "before_report"])
 def test_interrupted_labeling_resumes_complete_audit_without_replacing_drafts(
     tmp_path, monkeypatch, stage
