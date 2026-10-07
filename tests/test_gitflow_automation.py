@@ -174,6 +174,8 @@ def completion(**changes):
         "",
         " Swish!",
         " Bravo.",
+        " Hooray!",
+        " Can't wait for the next one!",
         " :tada:",
         " Keep it up!",
         " You're on a roll.",
@@ -206,6 +208,8 @@ def test_native_clean_comment_binds_unambiguous_pr_commit_and_reaches_merge_gate
         " Unknown closing.",
         " Already looking forward to the next diff. Review ended early",
         " Bravo. Review ended early",
+        " Hooray! Review ended early",
+        " Can't wait for the next one! Review ended early",
     ],
 )
 def test_clean_prefix_with_unsuccessful_or_blocking_suffix_cannot_pass(suffix):
@@ -243,6 +247,22 @@ def test_unknown_qualifications_anywhere_in_completion_body_block(extra, positio
     else:
         body += "\n<details>" + extra + "</details>"
     assert not flow.review_verdict(SHA, [], [], [completion(body=body)], [{"sha": SHA}])[0]
+
+
+@pytest.mark.parametrize(
+    "filename,head",
+    [
+        ("codex_hooray_completion.json", "d58396290f0866240c0899def6b77c3bfe3f4cdb"),
+        ("codex_next_review_completion.json", "08c9aaddd4086e91ae89145a75cba3959b68e2b9"),
+    ],
+)
+def test_observed_clean_completion_binds_its_real_reviewed_commit(filename, head):
+    fixture = Path(__file__).parent / "fixtures" / filename
+    comment = json.loads(fixture.read_text())
+    assert flow.review_verdict(head, [], [], [comment], [{"sha": head}])[0]
+    assert not flow.review_verdict(SHA, [], [], [comment], [{"sha": head}])[0]
+    altered = {**comment, "body": comment["body"] + "\nReview ended early"}
+    assert not flow.review_verdict(head, [], [], [altered], [{"sha": head}])[0]
 
 
 def test_observed_native_footer_allows_whitespace_variation_but_no_added_qualifiers():
