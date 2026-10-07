@@ -48,6 +48,8 @@ def _draft_boxes(detections, width: int, height: int) -> tuple[list, list, list]
 
 
 def _contact_sheets(dataset: Dataset, records: list[dict], output: Path) -> list[str]:
+    if not records:
+        return []
     from PIL import Image, ImageDraw, ImageFont, ImageOps
 
     paths = []
@@ -130,8 +132,8 @@ def auto_label(config: AppConfig, directory: Path, *, output: Path | None = None
     """Persist model suggestions without accepting any positives or negatives."""
     dataset = Dataset(directory)
     unreviewed = [record for record in dataset.records() if record["status"] == "unreviewed"]
-    if not unreviewed:
-        raise ValueError("No unreviewed pictures. Import your videos before auto-labeling.")
+    # Zero pending records still need publication: the last human review retires
+    # the previous audit without loading a model or changing reviewed labels.
     records = [record for record in unreviewed if "suggestion" in record]
     pending = [record for record in unreviewed if "suggestion" not in record]
     preserved_frames = len(records)
