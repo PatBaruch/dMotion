@@ -136,7 +136,6 @@ def auto_label(config: AppConfig, directory: Path, *, output: Path | None = None
     # the previous audit without loading a model or changing reviewed labels.
     records = [record for record in unreviewed if "suggestion" in record]
     pending = [record for record in unreviewed if "suggestion" not in record]
-    preserved_frames = len(records)
     output = config.resolve("outputs/video-autolabel") if output is None else Path(output).resolve()
     if output.is_relative_to(dataset.directory) or dataset.directory.is_relative_to(output):
         raise ValueError("Auto-label output must be separate from the source dataset")
@@ -150,6 +149,7 @@ def auto_label(config: AppConfig, directory: Path, *, output: Path | None = None
     _write_json(output / "predictions.json", {"version": 1, "records": records})
     model = config.resolve(config.detector.model)
     model_digest = revision = device = None
+    new_ids = set()
     if pending:
         import cv2
 
@@ -190,50 +190,77 @@ def auto_label(config: AppConfig, directory: Path, *, output: Path | None = None
             "confidence_threshold": config.detector.confidence,
             "image_size": config.detector.image_size,
         }
-        saved = dataset.suggest(record["id"], suggestion)
+        # Check and save under one manifest lock: a labeler may have completed
+        # this queued frame while inference ran. Another saved draft also wins.
+        with dataset.locked_records() as latest:
+            current = next((item for item in latest if item["id"] == record["id"]), None)
+            if current is None:
+                raise ValueError(f"No dataset image with ID {record['id']}")
+            if current["status"] != "unreviewed":
+                logger.info("Preserved concurrent human review of %s", record["source"])
+                continue
+            if "suggestion" in current:
+                saved = current
+            else:
+                saved = dataset.suggest(record["id"], suggestion)
+                new_ids.add(record["id"])
         records.append(saved)
         # Save progress before starting another potentially expensive inference.
         _write_json(output / "predictions.json", {"version": 1, "records": records})
         logger.info(
             "%s/%s: %s — %s proposed boxes", index, len(pending), record["source"], len(boxes)
         )
-    identities = dict.fromkeys(
-        (
-            item["suggestion"].get("model"),
-            item["suggestion"].get("model_sha256"),
-            item["suggestion"].get("model_revision"),
+    saved_ids = {record["id"] for record in records}
+    # Inference stays outside the manifest lock. Reconcile completed human reviews
+    # afterward, then keep the final snapshot stable through rendering/publication.
+    # Lock order is always manifest first, then the output's audit publication lock.
+    with dataset.locked_records() as latest:
+        records = [
+            record
+            for record in latest
+            if record["id"] in saved_ids
+            and record["status"] == "unreviewed"
+            and "suggestion" in record
+        ]
+        _write_json(output / "predictions.json", {"version": 1, "records": records})
+        new_frames = sum(record["id"] in new_ids for record in records)
+        identities = dict.fromkeys(
+            (
+                item["suggestion"].get("model"),
+                item["suggestion"].get("model_sha256"),
+                item["suggestion"].get("model_revision"),
+            )
+            for item in records
         )
-        for item in records
-    )
-    report = {
-        "version": 1,
-        "created_at": created,
-        "dataset": str(dataset.directory),
-        "engine": "yolo26m" if pending else "saved-drafts",
-        # These fields describe this invocation; each saved draft retains its identity.
-        "model": str(model) if pending else None,
-        "model_sha256": model_digest,
-        "model_revision": revision,
-        "device": device,
-        "new_frames": len(pending),
-        "preserved_frames": preserved_frames,
-        "models": [
-            {"model": name, "model_sha256": sha, "model_revision": rev}
-            for name, sha, rev in identities
-        ],
-        "confidence_threshold": config.detector.confidence,
-        "image_size": config.detector.image_size,
-        "frames": len(records),
-        "frames_with_boxes": sum(bool(record["suggestion"]["boxes"]) for record in records),
-        "boxes": sum(len(record["suggestion"]["boxes"]) for record in records),
-        "raw_boxes": sum(
-            record["suggestion"].get("raw_box_count", len(record["suggestion"]["boxes"]))
-            for record in records
-        ),
-        "overlap_threshold": 0.5,
-        "videos": sorted({record["source"].split(", ")[0] for record in records}),
-        "review_note": (
-            "AI drafts only. No-box frames are not negative labels. Review before training."
-        ),
-    }
-    return _publish_audit(dataset, records, output, report)
+        report = {
+            "version": 1,
+            "created_at": created,
+            "dataset": str(dataset.directory),
+            "engine": "yolo26m" if pending else "saved-drafts",
+            # These fields describe this invocation; each saved draft retains its identity.
+            "model": str(model) if pending else None,
+            "model_sha256": model_digest,
+            "model_revision": revision,
+            "device": device,
+            "new_frames": new_frames,
+            "preserved_frames": len(records) - new_frames,
+            "models": [
+                {"model": name, "model_sha256": sha, "model_revision": rev}
+                for name, sha, rev in identities
+            ],
+            "confidence_threshold": config.detector.confidence,
+            "image_size": config.detector.image_size,
+            "frames": len(records),
+            "frames_with_boxes": sum(bool(record["suggestion"]["boxes"]) for record in records),
+            "boxes": sum(len(record["suggestion"]["boxes"]) for record in records),
+            "raw_boxes": sum(
+                record["suggestion"].get("raw_box_count", len(record["suggestion"]["boxes"]))
+                for record in records
+            ),
+            "overlap_threshold": 0.5,
+            "videos": sorted({record["source"].split(", ")[0] for record in records}),
+            "review_note": (
+                "AI drafts only. No-box frames are not negative labels. Review before training."
+            ),
+        }
+        return _publish_audit(dataset, records, output, report)
