@@ -323,7 +323,7 @@ def validate_completion_comment(sha: str, comment: dict, commits: list[dict]) ->
     # text could retract completion in a way REVIEW_ERRORS does not recognize.
     if not re.fullmatch(
         r"Codex Review: Didn't find any major issues\."
-        r"(?: (?:Swish!|Bravo\.|Hooray!|:tada:|Keep it up!|You're on a roll\.|"
+        r"(?: (?:Swish!|Bravo\.|Hooray!|:tada:|:\+1:|Keep it up!|You're on a roll\.|"
         r"Chef's kiss\.|Another round soon, please!|Can't wait for the next one!|"
         r"Already looking forward to the next diff\.|"
         r"What shall we delve into next\?))?",

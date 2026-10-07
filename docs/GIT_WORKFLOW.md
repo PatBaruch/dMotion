@@ -97,13 +97,16 @@ the prose fully explains the feature.
   Editing the description reruns this check. Its source is the trusted default
   branch, so changes to that policy require promotion to `main` to take effect.
   Verified Dependabot PRs use their own generated documentation.
-- Protected branches require `test`, `pr-policy`, and `ai-review`, an up-to-date
+- The protection template requires `test`, `pr-policy`, and `ai-review`, an up-to-date
   branch, resolved review
   conversations, and PR-based changes. Force pushes/deletions and administrator
   bypasses are disabled. The solo-maintainer setup uses zero mandatory approving
   reviews: GitHub does not allow the PR author to approve their own PR. Add one
   required approval when an independent reviewer is available.
-  The exact remote configuration is stored in `.github/branch-protection.json`;
+  The intended configuration is stored in `.github/branch-protection.json`;
+  storing that file does not apply it to GitHub. Verify the live requirements
+  separately during rollout; the automation's own review gate cannot enforce
+  an omitted required check on another authorized merger.
   required checks accept results from the verified GitHub Actions app.
 - Codex PR review needs its separate account setting: connect `PatBaruch/dMotion`,
   enable repository code review, turn on automatic review for the desired PRs,
@@ -182,12 +185,14 @@ Existing native comments remain a strict compatibility path. They require the
 exact first-line clean sentence `Codex Review: Didn't find any major issues.`,
 a known observed decorative closing (or none), one `Reviewed commit` marker,
 and only an optional observed footer. Unknown prose anywhere fails closed.
-The recognized closings are `Swish!`, `Bravo.`, `Hooray!`, `:tada:`, `Keep it up!`, `You're on a roll.`,
+The recognized closings are `Swish!`, `Bravo.`, `Hooray!`, `:tada:`, `:+1:`, `Keep it up!`, `You're on a roll.`,
 `Chef's kiss.`, `Another round soon, please!`, `Already looking forward to the next diff.`, and
 `What shall we delve into next?`, plus `Can't wait for the next one!`. Failure messages
 and P0/P1 findings anywhere block both formats. PR #21's authenticated `Hooray!`
 completion and PR #24's `Can't wait for the next one!` completion are retained as
-regression fixtures, including their native footers and reviewed commits. Native
+regression fixtures, including their native footers and reviewed commits.
+PR #21's later `:+1:` completion is another authenticated fixture; a reaction
+alone still cannot pass because it provides no commit-bound completion body. Native
 wording can change independently of this repository: a new unrecognized closing
 requires inspecting the authentic response and adding a regression, while the
 structured contract avoids decorative-text parsing when the integration honors it.

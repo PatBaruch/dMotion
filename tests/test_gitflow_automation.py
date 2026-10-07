@@ -177,6 +177,7 @@ def completion(**changes):
         " Hooray!",
         " Can't wait for the next one!",
         " :tada:",
+        " :+1:",
         " Keep it up!",
         " You're on a roll.",
         " Already looking forward to the next diff.",
@@ -210,6 +211,7 @@ def test_native_clean_comment_binds_unambiguous_pr_commit_and_reaches_merge_gate
         " Bravo. Review ended early",
         " Hooray! Review ended early",
         " Can't wait for the next one! Review ended early",
+        " :+1: Review ended early",
     ],
 )
 def test_clean_prefix_with_unsuccessful_or_blocking_suffix_cannot_pass(suffix):
@@ -254,6 +256,7 @@ def test_unknown_qualifications_anywhere_in_completion_body_block(extra, positio
     [
         ("codex_hooray_completion.json", "d58396290f0866240c0899def6b77c3bfe3f4cdb"),
         ("codex_next_review_completion.json", "08c9aaddd4086e91ae89145a75cba3959b68e2b9"),
+        ("codex_thumbs_up_completion.json", "fa43fd398713dd82a060721a2b603f49926270cc"),
     ],
 )
 def test_observed_clean_completion_binds_its_real_reviewed_commit(filename, head):
