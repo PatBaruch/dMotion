@@ -186,8 +186,11 @@ Suggestions remain drafts, including frames with no detections. Review missed
 cash as well as incorrect boxes. Existing reviewed records and pending drafts
 are preserved. Rerunning after interruption rebuilds the complete report and
 contact sheets from saved drafts without repeating their inference. Reports and
-contact sheets go to `outputs/video-autolabel/`. A successful rebuild removes
-obsolete numbered sheet pages after partial human review.
+contact sheets go to `outputs/video-autolabel/`. Open the sheet paths listed in
+`report.json`; each published set has its own folder under `contact-sheets/`.
+`predictions.json` saves draft progress; `report.json` describes the last published set.
+Rebuilds keep the previous set intact until the new report is saved, then remove
+obsolete generated pages after partial human review.
 No separate labeling model or text encoder is required. Training refuses pending
 AI suggestions until you explicitly choose cash, no cash, or skip.
 

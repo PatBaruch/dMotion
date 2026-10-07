@@ -4,8 +4,12 @@ import hashlib
 import logging
 import math
 import re
+import tempfile
+import uuid
 from datetime import UTC, datetime
 from pathlib import Path
+
+from filelock import FileLock
 
 from dmotion.config import AppConfig
 from dmotion.dataset import Dataset, _write_json
@@ -80,6 +84,48 @@ def _contact_sheets(dataset: Dataset, records: list[dict], output: Path) -> list
     return paths
 
 
+def _prune_contact_sheets(output: Path, current: Path) -> None:
+    """Remove only generated pages; preserve unrelated files and directories."""
+    folders = [output]
+    for folder in current.parent.iterdir():
+        if (
+            folder != current
+            and re.fullmatch(r"[0-9a-f]{32}", folder.name)
+            and not folder.is_symlink()
+            and folder.is_dir()
+        ):
+            folders.append(folder)
+    for folder in folders:
+        for page in folder.glob("contact-sheet-*.jpg"):
+            if re.fullmatch(r"contact-sheet-[0-9]{2,}\.jpg", page.name) and page.is_file():
+                page.unlink()
+        if folder != output and not any(folder.iterdir()):
+            folder.rmdir()
+
+
+def _publish_audit(dataset: Dataset, records: list[dict], output: Path, report: dict) -> Path:
+    """Stage immutable pages, then atomically switch the report under a publication lock."""
+    report_path = output / "report.json"
+    with tempfile.TemporaryDirectory(prefix=".contact-sheet-stage-", dir=output) as temporary:
+        staged = Path(temporary) / "sheets"
+        staged.mkdir()
+        sheets = _contact_sheets(dataset, records, staged)
+        relative_paths = [Path(path).relative_to(staged) for path in sheets]
+        with FileLock(output / ".audit.lock"):
+            generations = output / "contact-sheets"
+            if generations.is_symlink():
+                raise ValueError("Contact-sheet generations must not be a symbolic link")
+            generations.mkdir(exist_ok=True)
+            current = generations / uuid.uuid4().hex
+            staged.rename(current)
+            report["contact_sheets"] = [str(current / path) for path in relative_paths]
+            # Keep the previous generation if writing fails. Even a failure after
+            # replacement leaves whichever report was committed with intact pages.
+            _write_json(report_path, report)
+            _prune_contact_sheets(output, current)
+    return report_path
+
+
 def auto_label(config: AppConfig, directory: Path, *, output: Path | None = None) -> Path:
     """Persist model suggestions without accepting any positives or negatives."""
     dataset = Dataset(directory)
@@ -149,7 +195,6 @@ def auto_label(config: AppConfig, directory: Path, *, output: Path | None = None
         logger.info(
             "%s/%s: %s — %s proposed boxes", index, len(pending), record["source"], len(boxes)
         )
-    sheets = _contact_sheets(dataset, records, output)
     identities = dict.fromkeys(
         (
             item["suggestion"].get("model"),
@@ -185,21 +230,8 @@ def auto_label(config: AppConfig, directory: Path, *, output: Path | None = None
         ),
         "overlap_threshold": 0.5,
         "videos": sorted({record["source"].split(", ")[0] for record in records}),
-        "contact_sheets": sheets,
         "review_note": (
             "AI drafts only. No-box frames are not negative labels. Review before training."
         ),
     }
-    report_path = output / "report.json"
-    _write_json(report_path, report)
-    # Prune only after committing the report so an interrupted rebuild cannot
-    # leave the previous report referencing a deleted page.
-    current_sheets = {Path(path) for path in sheets}
-    for old_sheet in output.glob("contact-sheet-*.jpg"):
-        if (
-            old_sheet not in current_sheets
-            and re.fullmatch(r"contact-sheet-[0-9]{2,}\.jpg", old_sheet.name)
-            and old_sheet.is_file()
-        ):
-            old_sheet.unlink()
-    return report_path
+    return _publish_audit(dataset, records, output, report)
