@@ -6,7 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from dmotion.autolabel import _draft_boxes, auto_label
+from dmotion.autolabel import _contact_sheets, _draft_boxes, auto_label
 from dmotion.config import AppConfig
 from dmotion.dataset import Dataset, _write_json
 from dmotion.detector import Detection
@@ -139,6 +139,83 @@ def test_existing_pending_draft_is_preserved_without_loading_model(tmp_path, mon
     predictions = json.loads(report.with_name("predictions.json").read_text())
     assert predictions["records"][0]["suggestion"]["model"] == "old-model"
     assert dataset.manifest_path.read_bytes() == before
+
+
+@pytest.mark.parametrize("fail_report", [False, True])
+def test_final_human_review_publishes_empty_audit_and_preserves_truth(
+    tmp_path, monkeypatch, fail_report
+):
+    dataset = Dataset(tmp_path / "dataset")
+    for index in range(3):
+        image = tmp_path / f"frame-{index}.jpg"
+        image.write_bytes(f"image {index}".encode())
+        record = dataset.add_image(image, group="session", width=100, height=80)
+        dataset.suggest(
+            record["id"],
+            {
+                "boxes": [],
+                "scores": [],
+                "labels": [],
+                "model": "cash-checkpoint",
+                "created_at": "2026-10-07T00:00:00+00:00",
+                "prompts": ["cash"],
+            },
+        )
+
+    def render(dataset, records, output):
+        path = output / "contact-sheet-01.jpg"
+        path.write_text("\n".join(record["id"] for record in records))
+        return [str(path)]
+
+    monkeypatch.setattr("dmotion.autolabel._contact_sheets", render)
+    config = AppConfig(root=tmp_path)
+    report = auto_label(config, dataset.directory)
+    previous = report.read_bytes()
+    sheet = Path(json.loads(previous)["contact_sheets"][0])
+    sheet_bytes = sheet.read_bytes()
+    notes = sheet.parent / "review-notes.txt"
+    notes.write_bytes(b"human notes")
+    for record, status in zip(dataset.records(), ["positive", "negative", "excluded"], strict=True):
+        dataset.review(
+            record["id"], status=status, boxes=[[2, 3, 12, 13]] if status == "positive" else []
+        )
+    manifest = dataset.manifest_path.read_bytes()
+    images = {path: path.read_bytes() for path in (dataset.directory / "images").iterdir()}
+    monkeypatch.setattr("dmotion.autolabel._contact_sheets", _contact_sheets)
+    for module in ("PIL", "cv2", "ultralytics"):
+        monkeypatch.setitem(sys.modules, module, None)
+    if fail_report:
+
+        def write(path, value):
+            if path.name == "report.json":
+                raise RuntimeError("report interrupted")
+            _write_json(path, value)
+
+        monkeypatch.setattr("dmotion.autolabel._write_json", write)
+        with pytest.raises(RuntimeError, match="report interrupted"):
+            auto_label(config, dataset.directory)
+        assert report.read_bytes() == previous
+        assert sheet.read_bytes() == sheet_bytes
+        monkeypatch.setattr("dmotion.autolabel._write_json", _write_json)
+    summary = json.loads(auto_label(config, dataset.directory).read_text())
+    for field in ("frames", "new_frames", "preserved_frames", "frames_with_boxes", "boxes"):
+        assert summary[field] == 0
+    assert summary["contact_sheets"] == summary["models"] == []
+    assert json.loads(report.with_name("predictions.json").read_text())["records"] == []
+    assert not sheet.exists()
+    assert not list(report.parent.glob("contact-sheets/*/contact-sheet-*.jpg"))
+    assert notes.read_bytes() == b"human notes"
+    assert dataset.manifest_path.read_bytes() == manifest
+    assert all(path.read_bytes() == contents for path, contents in images.items())
+
+
+def test_empty_dataset_publishes_empty_audit_without_optional_vision(tmp_path, monkeypatch):
+    dataset = Dataset(tmp_path / "dataset")
+    for module in ("PIL", "cv2", "ultralytics"):
+        monkeypatch.setitem(sys.modules, module, None)
+    summary = json.loads(auto_label(AppConfig(root=tmp_path), dataset.directory).read_text())
+    assert summary["frames"] == 0
+    assert summary["contact_sheets"] == []
 
 
 @pytest.mark.parametrize("stage", ["during_inference", "before_report"])

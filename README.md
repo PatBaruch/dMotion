@@ -191,6 +191,8 @@ contact sheets go to `outputs/video-autolabel/`. Open the sheet paths listed in
 `predictions.json` saves draft progress; `report.json` describes the last published set.
 Rebuilds keep the previous set intact until the new report is saved, then remove
 obsolete generated pages after partial human review.
+After the final image is reviewed, rerun `auto-label` to publish zero pending
+records and remove the obsolete sheets. An empty rebuild needs no model or vision dependencies.
 No separate labeling model or text encoder is required. Training refuses pending
 AI suggestions until you explicitly choose cash, no cash, or skip.
 
