@@ -182,10 +182,16 @@ Existing native comments remain a strict compatibility path. They require the
 exact first-line clean sentence `Codex Review: Didn't find any major issues.`,
 a known observed decorative closing (or none), one `Reviewed commit` marker,
 and only an optional observed footer. Unknown prose anywhere fails closed.
-The recognized closings are `Swish!`, `Bravo.`, `:tada:`, `Keep it up!`, `You're on a roll.`,
+The recognized closings are `Swish!`, `Bravo.`, `Hooray!`, `:tada:`, `Keep it up!`, `You're on a roll.`,
 `Chef's kiss.`, `Another round soon, please!`, `Already looking forward to the next diff.`, and
-`What shall we delve into next?`. Failure messages and P0/P1 findings anywhere
-block both formats. New integrations should use the JSON contract.
+`What shall we delve into next?`, plus `Can't wait for the next one!`. Failure messages
+and P0/P1 findings anywhere block both formats. PR #21's authenticated `Hooray!`
+completion and PR #24's `Can't wait for the next one!` completion are retained as
+regression fixtures, including their native footers and reviewed commits. Native
+wording can change independently of this repository: a new unrecognized closing
+requires inspecting the authentic response and adding a regression, while the
+structured contract avoids decorative-text parsing when the integration honors it.
+New integrations should use the JSON contract.
 
 A shortened SHA must
 uniquely identify the current head among the PR's commits; at least ten hexadecimal
