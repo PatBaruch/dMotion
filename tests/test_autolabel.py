@@ -5,6 +5,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from filelock import FileLock, Timeout
 
 from dmotion.autolabel import _contact_sheets, _draft_boxes, auto_label
 from dmotion.config import AppConfig
@@ -216,6 +217,131 @@ def test_empty_dataset_publishes_empty_audit_without_optional_vision(tmp_path, m
     summary = json.loads(auto_label(AppConfig(root=tmp_path), dataset.directory).read_text())
     assert summary["frames"] == 0
     assert summary["contact_sheets"] == []
+
+
+@pytest.mark.parametrize("review_all", [False, True])
+def test_publication_reconciles_late_reviews_and_locks_the_manifest(
+    tmp_path, monkeypatch, review_all
+):
+    dataset = Dataset(tmp_path / "dataset")
+    for index in range(2):
+        image = tmp_path / f"frame-{index}.jpg"
+        image.write_bytes(f"image {index}".encode())
+        record = dataset.add_image(image, group="session", width=100, height=80)
+        dataset.suggest(
+            record["id"],
+            {
+                "boxes": [],
+                "scores": [],
+                "labels": [],
+                "model": f"saved-model-{index}",
+                "created_at": "2026-10-07T00:00:00+00:00",
+                "prompts": ["cash"],
+            },
+        )
+    original = dataset.records()
+    other_lock = FileLock(dataset._manifest_lock.lock_file)
+    reviewed = original if review_all else original[:1]
+    state = {"reviewed": False}
+
+    def write(path, value):
+        _write_json(path, value)
+        if path.name == "predictions.json" and not state["reviewed"]:
+            state["reviewed"] = True
+            for record in reviewed:
+                dataset.review(record["id"], status="positive", boxes=[[2, 3, 12, 13]])
+            state["manifest"] = dataset.manifest_path.read_bytes()
+
+    def render(dataset, records, output):
+        state["rendered"] = [record["id"] for record in records]
+        # A competing labeler/importer cannot mutate the manifest between this
+        # final snapshot and report publication. No threads or timing sleeps needed.
+        with pytest.raises(Timeout), other_lock.acquire(timeout=0):
+            pass
+        return []
+
+    monkeypatch.setitem(sys.modules, "cv2", None)
+    monkeypatch.setattr("dmotion.autolabel._write_json", write)
+    monkeypatch.setattr("dmotion.autolabel._contact_sheets", render)
+    report = auto_label(AppConfig(root=tmp_path), dataset.directory)
+    summary = json.loads(report.read_text())
+    expected = [] if review_all else [original[1]["id"]]
+    assert state["rendered"] == expected
+    predictions = json.loads(report.with_name("predictions.json").read_text())["records"]
+    assert [record["id"] for record in predictions] == expected
+    assert summary["frames"] == summary["preserved_frames"] == len(expected)
+    assert summary["new_frames"] == 0
+    assert [model["model"] for model in summary["models"]] == (
+        [] if review_all else ["saved-model-1"]
+    )
+    assert dataset.manifest_path.read_bytes() == state["manifest"]
+    with other_lock.acquire(timeout=0):
+        pass  # Publication released the manifest lock.
+
+
+@pytest.mark.parametrize("decision", ["positive", "negative", "excluded", "all", "other-draft"])
+def test_inference_preserves_a_concurrent_review_or_existing_draft(tmp_path, monkeypatch, decision):
+    dataset = Dataset(tmp_path / "dataset")
+    records = []
+    for index in range(2):
+        image = tmp_path / f"frame-{index}.jpg"
+        image.write_bytes(f"image {index}".encode())
+        records.append(dataset.add_image(image, group="session", width=100, height=80))
+    checkpoint = tmp_path / "models/cash-yolo26m.pt"
+    checkpoint.parent.mkdir()
+    checkpoint.write_bytes(b"checkpoint")
+    state = {"calls": 0}
+
+    class Detector:
+        device = "cpu"
+
+        def __init__(self, config):
+            pass
+
+        def predict(self, frame):
+            state["calls"] += 1
+            if state["calls"] == 1:
+                changed = records if decision == "all" else records[:1]
+                for record in changed:
+                    if decision == "other-draft":
+                        dataset.suggest(
+                            record["id"],
+                            {
+                                "boxes": [],
+                                "scores": [],
+                                "labels": [],
+                                "model": "other-checkpoint",
+                                "created_at": "2026-10-07T00:00:00+00:00",
+                                "prompts": ["cash"],
+                            },
+                        )
+                    else:
+                        dataset.review(
+                            record["id"],
+                            status="negative" if decision == "all" else decision,
+                            boxes=[[2, 3, 12, 13]] if decision == "positive" else [],
+                        )
+                state["preserved"] = [dataset.get_record(record["id"]) for record in changed]
+            return [Detection((10, 10, 90, 70), 0.8, "cash")]
+
+    monkeypatch.setitem(
+        sys.modules, "cv2", SimpleNamespace(imread=lambda _: SimpleNamespace(shape=(80, 100, 3)))
+    )
+    monkeypatch.setattr("dmotion.autolabel.MoneyDetector", Detector)
+    monkeypatch.setattr("dmotion.autolabel._contact_sheets", lambda *args: [])
+    report = auto_label(AppConfig(root=tmp_path), dataset.directory)
+    summary = json.loads(report.read_text())
+    expected = [] if decision == "all" else records if decision == "other-draft" else records[1:]
+    published = json.loads(report.with_name("predictions.json").read_text())["records"]
+    assert [record["id"] for record in published] == [record["id"] for record in expected]
+    assert all(record["status"] == "unreviewed" for record in published)
+    assert summary["frames"] == len(expected)
+    assert summary["new_frames"] == (0 if decision == "all" else 1)
+    assert summary["preserved_frames"] == (1 if decision == "other-draft" else 0)
+    for record in state["preserved"]:
+        assert dataset.get_record(record["id"]) == record
+    if decision == "other-draft":
+        assert published[0]["suggestion"]["model"] == "other-checkpoint"
 
 
 @pytest.mark.parametrize("stage", ["during_inference", "before_report"])

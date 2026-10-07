@@ -193,6 +193,8 @@ Rebuilds keep the previous set intact until the new report is saved, then remove
 obsolete generated pages after partial human review.
 After the final image is reviewed, rerun `auto-label` to publish zero pending
 records and remove the obsolete sheets. An empty rebuild needs no model or vision dependencies.
+Rebuilds reconcile reviews saved during inference before publishing their audit.
+While sheets are being rebuilt, a new review save can wait until publication finishes.
 No separate labeling model or text encoder is required. Training refuses pending
 AI suggestions until you explicitly choose cash, no cash, or skip.
 
