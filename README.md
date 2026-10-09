@@ -376,7 +376,7 @@ training keeps its snapshot available until the run finishes.
 
 The pipeline runs tests, security scans, package checks, and PR policy. It does not
 request or require AI code review. Disable the separate repository automatic-review
-toggle in [Codex settings](https://chatgpt.com/codex/settings/code-review) to prevent
+toggle in [Codex settings](https://chatgpt.com/settings/code-review) to prevent
 account-triggered reviews from consuming tokens. Existing review findings still
 need resolution before merging.
 
