@@ -14,13 +14,13 @@ from dmotion.config import apply_mode, load_config, validate
 
 
 def parser() -> argparse.ArgumentParser:
-    root = argparse.ArgumentParser(description="Local money-spread camera experiment")
+    root = argparse.ArgumentParser(description="Local YOLO26m cash detector")
     root.add_argument("--version", action="version", version=__version__)
     commands = root.add_subparsers(dest="command", required=True)
     for name, help_text in [
         ("run", "Open the webcam detector"),
         ("image", "Detect a saved photo and save an annotated copy"),
-        ("prepare", "Download/load model weights and verify inference without a camera"),
+        ("prepare", "Verify your cash checkpoint without a camera"),
         ("doctor", "Validate settings and report installed dependencies"),
         ("sound", "Test the configured alert sound"),
         ("dataset", "Show photo and label counts"),
@@ -30,7 +30,7 @@ def parser() -> argparse.ArgumentParser:
         ("auto-label", "Suggest cash boxes for unreviewed pictures using local AI"),
         ("fetch", "Download a curated JSON list of image URLs"),
         ("build-dataset", "Export reviewed examples to grouped YOLO splits"),
-        ("train", "Train a small money-spread model from reviewed examples"),
+        ("train", "Train a YOLO26m cash candidate from reviewed examples"),
     ]:
         command = commands.add_parser(name, help=help_text)
         command.add_argument("--config", type=Path, default=Path("config.toml"))
@@ -38,9 +38,9 @@ def parser() -> argparse.ArgumentParser:
             if name != "auto-label":
                 command.add_argument(
                     "--mode",
-                    choices=("money", "check", "trained"),
+                    choices=("money", "trained"),
                     default="money",
-                    help="check detects common objects to verify the model works",
+                    help="compatibility aliases; both use the configured YOLO26m cash checkpoint",
                 )
             command.add_argument("--confidence", type=float)
             command.add_argument(
@@ -48,9 +48,6 @@ def parser() -> argparse.ArgumentParser:
             )
             command.add_argument("--device")
             command.add_argument("--model", help="Override the model path for the selected mode")
-            command.add_argument(
-                "--prompt", action="append", help="Repeat to replace default prompts"
-            )
         if name == "run":
             command.add_argument("--camera", type=int)
             command.add_argument("--mute", action="store_true")
@@ -73,7 +70,6 @@ def parser() -> argparse.ArgumentParser:
         if name == "auto-label":
             command.set_defaults(confidence=0.1, image_size=640, device="cpu")
             command.add_argument("--output", type=Path)
-            command.add_argument("--engine", choices=("world", "grounding"), default="world")
         if name == "label":
             command.add_argument("--port", type=int, default=0)
             command.add_argument("--no-browser", action="store_true")
@@ -96,6 +92,7 @@ def parser() -> argparse.ArgumentParser:
             command.add_argument("--patience", type=int, default=10)
             command.add_argument("--image-size", type=int, default=640)
             command.add_argument("--device", default="auto")
+            command.add_argument("--batch", type=int, default=2)
     return root
 
 
@@ -108,7 +105,6 @@ def doctor(config) -> int:
         ("ultralytics", "ultralytics"),
         ("torch", "torch"),
         ("pygame", "pygame"),
-        ("clip", "clip"),
     ]:
         if util.find_spec(module) is None:
             print(f"{distribution}: MISSING")
@@ -116,7 +112,12 @@ def doctor(config) -> int:
         else:
             print(f"{distribution}: {metadata.version(distribution)}")
     print(f"Model: {config.resolve(config.detector.model)}")
-    print(f"Prompts: {', '.join(config.detector.prompts)}")
+    checkpoint_status = (
+        "present"
+        if config.resolve(config.detector.model).is_file()
+        else "MISSING (supply --model or train)"
+    )
+    print(f"Cash checkpoint: {checkpoint_status}")
     sound = config.resolve(config.audio.file)
     print(f"Sound: {sound if sound.is_file() else 'built-in beep (custom WAV not added)'}")
     if missing:
@@ -129,32 +130,12 @@ def main(argv: list[str] | None = None) -> int:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
     try:
         config = load_config(args.config)
-        if args.command == "auto-label":
-            from dmotion.config import DetectorConfig
-
-            config = replace(
-                config,
-                detector=replace(
-                    config.detector,
-                    backend="world",
-                    model=(
-                        config.detector.model
-                        if config.detector.backend == "world"
-                        else DetectorConfig().model
-                    ),
-                    prompts=("paper money",),
-                ),
-            )
         if getattr(args, "mode", None):
             config = apply_mode(config, args.mode)
-            if args.mode == "check":
-                logging.info("AI check mode: look for a person, phone, cup, bottle, or book")
         overrides = {}
         for name in ("confidence", "image_size", "device", "model"):
             if getattr(args, name, None) is not None:
                 overrides[name] = getattr(args, name)
-        if getattr(args, "prompt", None):
-            overrides["prompts"] = tuple(args.prompt)
         if overrides:
             config = replace(config, detector=replace(config.detector, **overrides))
         if getattr(args, "camera", None) is not None:
@@ -176,7 +157,7 @@ def main(argv: list[str] | None = None) -> int:
             if args.command == "auto-label":
                 from dmotion.autolabel import auto_label
 
-                report = auto_label(config, directory, output=args.output, engine=args.engine)
+                report = auto_label(config, directory, output=args.output)
                 print(f"AI suggestions saved. Open make label to review. Report: {report}")
                 return 0
             if args.command == "collect":
@@ -223,8 +204,9 @@ def main(argv: list[str] | None = None) -> int:
                     patience=args.patience,
                     image_size=args.image_size,
                     device=args.device,
+                    batch=args.batch,
                 )
-                print(f"Saved {model}. Test it with make trained.")
+                print(f"Saved candidate {model}. Calibrate on validation, then test with --model.")
                 return 0
         if args.command == "doctor":
             return doctor(config)
@@ -255,7 +237,7 @@ def main(argv: list[str] | None = None) -> int:
 
         if args.command == "image":
             return run_image(config, args.source, args.output, args.show)
-        return run_camera(config, demo=args.demo, checking=args.mode == "check")
+        return run_camera(config, demo=args.demo)
     except KeyboardInterrupt:
         return 130
     except Exception as exc:

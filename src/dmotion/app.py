@@ -76,7 +76,7 @@ def run_image(config: AppConfig, source: Path, output: Path | None, show: bool) 
     return 0
 
 
-def run_camera(config: AppConfig, *, demo: bool = False, checking: bool = False) -> int:
+def run_camera(config: AppConfig, *, demo: bool = False) -> int:
     import cv2
 
     detector = None if demo else MoneyDetector(config)
@@ -133,7 +133,7 @@ def run_camera(config: AppConfig, *, demo: bool = False, checking: bool = False)
                     else:
                         if monitor.complete(new_detections, submitted_at, now):
                             sound.play()
-                            logger.info("Object detected" if checking else "Motion detected")
+                            logger.info("Cash detected")
                         if monitor.last_result_stale:
                             logger.warning(
                                 "Result discarded: %.0f ms exceeds the %.1fs age limit",
@@ -159,14 +159,8 @@ def run_camera(config: AppConfig, *, demo: bool = False, checking: bool = False)
                 lines = ["DEMO: simulated boxes, no AI | T to simulate"]
             else:
                 lines = [
-                    "AI CHECK: person / phone / cup / bottle / book"
-                    if checking
-                    else (
-                        "TRAINED MONEY SPREAD | Test with new examples"
-                        if config.detector.backend == "trained"
-                        else "MONEY MODE | To test common objects: make diagnose"
-                    ),
-                    monitor.headline(now, checking=checking, confidence=config.detector.confidence),
+                    "YOLO26m CASH | Test with new examples",
+                    monitor.headline(now, confidence=config.detector.confidence),
                     f"Frames analysed: {monitor.completed} | Objects now: {len(detections)}"
                     f" | Last check: {monitor.inference_ms:.0f} ms | Device: {detector.device}",
                 ]
@@ -206,7 +200,7 @@ def run_camera(config: AppConfig, *, demo: bool = False, checking: bool = False)
                 if demo:
                     demo_until = now + 2.0
             elif key == ord("s"):
-                photos = config.root / "data"
+                photos = config.root / "data" / "photos"
                 photos.mkdir(parents=True, exist_ok=True)
                 target = photos / f"test-{datetime.now():%Y%m%d-%H%M%S-%f}.jpg"
                 if not cv2.imwrite(str(target), frame):

@@ -15,12 +15,12 @@ is bug-free, that the detector is accurate, or that an AI reviewer found every b
 3. GitHub independently runs the matrix, dependency audit, package installation,
    and CodeQL scans. The required `test` check passes only if every job succeeds;
    failed, cancelled, or skipped jobs cannot make the aggregate green.
-4. Configured Codex automatic review adds a second examination of the code.
-   While the task is active, the implementing agent reads findings, fixes relevant
-   issues, and reruns checks for the updated commit.
-5. Trusted Gitflow automation rechecks exact-head CI and completed Codex review,
-   blocks unresolved findings, and merges opted-in PRs through protections.
-   Reviewed release and return-sync PRs maintain `main` and `develop`.
+4. Trusted Gitflow automation rechecks exact-head CI and PR policy, blocks existing
+   unresolved findings and requests for changes, and merges opted-in PRs through
+   protections. Release and return-sync PRs maintain `main` and `develop`.
+5. AI review is optional and is requested only when the user explicitly asks.
+   Automatic review requests and the `ai-review` merge gate have been removed to
+   avoid repeated token consumption. Existing review findings still need resolution.
 
 ## What is checked
 
@@ -30,19 +30,21 @@ is bug-free, that the detector is accurate, or that an AI reviewer found every b
 | pytest | Core behavior on Linux and macOS, Python 3.11, 3.12, and 3.13; each test has a 60-second timeout | JUnit XML |
 | Coverage | Lines and branches in application code and Python workflow scripts; minimum 65% | Coverage XML and JSON with uncovered paths |
 | Bandit | Python source and workflow scripts; medium/high findings fail | JSON report |
-| Dependency audit | Every registry name/version in `uv.lock`, including optional vision/labeling and alternate platform versions; any known vulnerability or collection error fails | Audit JSON and explicit scope inventory |
+| Dependency audit | Every registry name/version in `uv.lock`, including optional vision and alternate platform versions; any known vulnerability or collection error fails | Audit JSON and explicit scope inventory |
 | CodeQL | Python and GitHub Actions, extended security queries; scores at least 7.0 or error-level findings fail | SARIF and GitHub Security alerts |
 | Distribution | Locked build tools build a wheel and source archive; wheel installs into a fresh environment with hashed, locked core dependencies; CLI help/version work outside the source tree | Distribution files and SHA-256 checksums |
 | PR policy | Gitflow destination, useful title, and four completed documentation sections | `pr-policy` result |
-| AI review | Authenticated Codex bot, submitted review or recognized clean completion comment bound to the latest commit; shortened SHAs must be unambiguous in the PR; absent, failed, stale, blocking results and unresolved threads fail | `ai-review`, native review/comment ID and commit SHA |
 
 The coverage floor reflects a measured baseline, not a target for finished
 production software. Camera/UI paths are currently poorly covered and remain
 visible in the report. Increase meaningful coverage over time; do not hide
 uncovered application code or lower the threshold to make a feature pass.
 
-The dependency service cannot audit the pinned Git snapshot of Ultralytics CLIP
-as a registry release. That exclusion is explicitly recorded with its source;
+The current YOLO26m workflow removes the CLIP Git dependency, Transformers and
+Grounding DINO integration. The following records the earlier audit work.
+
+Historically, the dependency service could not audit the pinned Git snapshot of Ultralytics CLIP
+as a registry release. That former exclusion was explicitly recorded with its source;
 the model files and Git dependency still need provenance/security review.
 An advisory scan reports known published vulnerabilities, not all vulnerabilities.
 
@@ -85,38 +87,26 @@ important demonstration evidence before expiry.
 
 ## Account prerequisites and rollout
 
-Feature completion and the trusted Gitflow loop request explicit native review
-once per opted-in commit when completion is missing or stale. Automatic no-findings
-reviews may produce only a reaction; that cannot satisfy the commit-bound gate.
-Requests are deduplicated, preserve unmanaged/draft/fork PRs, and never substitute
-for a completed result. Account or review-allowance failures continue to block.
+Feature completion and the trusted Gitflow loop do not request AI reviews.
+Disable automatic review for `PatBaruch/dMotion` in the separate
+[Codex code review settings](https://chatgpt.com/settings/code-review)
+to stop account-triggered reviews too. A repository commit cannot change that setting.
 
-- Complete the repair through current-head reviewed feature and release PRs.
-  Default-branch policy, schedules, and Dependabot configuration activate on main;
-  then add the AI review gate to both protected branches without weakening checks.
-- In [Codex code review settings](https://chatgpt.com/codex/settings/code-review),
-  connect `PatBaruch/dMotion`, enable repository code review and automatic review,
-  and select a trigger covering new commits. Check personal preferences if the
-  repository uses them. Verify the next PR receives an actual review.
-- Verify the account GitHub connection authorizes dMotion. A bot reply requesting
-  connection is a failed request even if the repository toggle saved.
-- Permit Actions to create promotion PRs; GitHub bundles this with approval
-  capability. This workflow never approves, and accepts only the independent
-  Codex connector as AI reviewer. Keep read-only default token permissions.
-- Enable Dependabot security updates and retain actual scheduled scan/update
-  evidence separately from configuration and manually dispatched runs.
+- Default-branch policy, schedules, and Dependabot configuration activate on main.
+  Require `test` and `pr-policy` on both protected branches. Remove only the retired
+  `ai-review` context if it exists; preserve the security checks and other protections.
+- Permit Actions to create promotion PRs. GitHub bundles this with approval capability;
+  this workflow never submits reviews. Keep read-only default token permissions.
+- Enable Dependabot security updates and retain actual scheduled scan/update evidence
+  separately from configuration and manually dispatched runs.
 - Add an independent human reviewer and require an approving review when one is
-  available. The current solo-maintainer protections use zero required approvals
-  because GitHub prevents authors from approving their own PRs.
+  available. The solo-maintainer setup uses zero required approvals because GitHub
+  prevents authors from approving their own PRs.
 
-AI findings require inspection; their absence is not a passing review. Current agent
-instructions authorize merging only after CI/security and current-commit AI
-review gates pass. They do not authorize tagging or production deployment.
-The local completion behavior depends
-on an active agent following `AGENTS.md`; GitHub checks and configured reviews
-and the deployed Gitflow loop continue after that chat stops. A stopped agent
-does not repair failures. Missing account access cannot be solved by pretending
-a review passed or copying the local user's token into repository secrets.
+An active agent fixes failed checks and any existing review findings. The deployed
+Gitflow loop continues after the chat stops but cannot implement repairs. Tagging
+and production deployment still need separate authorization. Never pretend that
+an optional AI review passed, or copy local credentials into repository secrets.
 
 ## Demonstrate the process
 

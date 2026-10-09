@@ -2,271 +2,384 @@
 
 [![Checks](https://github.com/PatBaruch/dMotion/actions/workflows/checks.yml/badge.svg?branch=main)](https://github.com/PatBaruch/dMotion/actions/workflows/checks.yml)
 
-AI-assisted changes use automated tests, security checks, package verification,
-and documented pull requests. See [the reliability evidence and limits](docs/AI_RELIABILITY.md).
+dMotion is a local Python app that recognizes visible cash through a webcam,
+draws a white box around it, and plays an alert. Fans of notes, stacks, and single
+bills all count as cash. It uses OpenCV for the camera, **YOLO26m** for detection,
+and Pygame for audio. It can also test photos, collect recordings, help you review
+labels, and train a new cash detector.
 
-A local laptop experiment: show cash to the webcam, get a white box around the
-banknotes, and hear an alert. Fans, stacks, and single bills count as cash.
-Python, OpenCV, Ultralytics YOLO, and Pygame.
+YOLO26m is the supported model family. YOLO-World prompts, YOLOE reference photos,
+YOLOE training, and Grounding DINO are retired. Different trained YOLO26m
+checkpoints use the same commands; choose one with `--model` or `config.local.toml`.
+Detection is experimental: evaluate misses, false alarms, and speed on new sessions
+before relying on a checkpoint.
 
-**Detection is experimental.** The pretrained model guesses from text prompts.
-The training workflow below teaches a separate detector to recognize displayed
-cash using examples you review. Its internal class name remains `money_spread`
-to keep existing models and commands compatible.
+**Weights and datasets are not bundled.** A fresh clone can check its camera and
+audio immediately after setup. Real cash detection requires your trained cash
+checkpoint or the training steps below. The generic pretrained `yolo26m.pt` is
+the starting point for training; it is not a ready-made cash detector.
 
-## Start on this laptop
+## Contents
 
-The project uses Python 3.11 and an isolated `.venv`. Setup installs a pinned uv
-dependency manager into `.tools`; it does not change your system Python.
+- [Install and check the camera](#install-and-check-the-camera)
+- [Use a trained checkpoint](#use-a-trained-checkpoint)
+- [Test photos and choose another checkpoint](#test-photos-and-choose-another-checkpoint)
+- [Collect and review a dataset](#collect-and-review-a-dataset)
+- [Train YOLO26m and evaluate the candidate](#train-yolo26m-and-evaluate-the-candidate)
+- [Configuration and tuning](#configuration-and-tuning)
+- [Commands and project files](#commands-and-project-files)
+- [Troubleshooting](#troubleshooting)
+- [Development](#development)
+
+## Install and check the camera
+
+Use Python **3.11, 3.12, or 3.13**, Git, and `make`. The shell shortcuts target
+macOS and Linux with a desktop GUI. On macOS, command-line tools provide Git and
+make (`xcode-select --install` if they are missing); install a supported Python
+before setup. Internet access is needed for initial dependencies and pretrained
+weights. CUDA requires compatible GPU drivers; Apple Silicon can use MPS.
 
 ```sh
+git clone --branch main https://github.com/PatBaruch/dMotion.git
+cd dMotion
 make setup
+make doctor
+make demo
+```
+
+`make setup` installs pinned uv 0.12.22 in `.tools/` and the dependencies in
+`uv.lock` in `.venv/`. It does not replace your system Python. To select a specific
+interpreter, run `DMOTION_PYTHON=/path/to/python3.11 make setup`.
+Run commands from the repository root.
+
+`doctor` lists dependencies, the configured checkpoint path, and the audio asset.
+A missing cash checkpoint is expected in a fresh clone. In the demo window,
+press **T**: a simulated white box and beep verify camera, display, and audio.
+Press **Q** to quit. Demo mode does not load a model or measure recognition.
+
+On macOS, give Camera access to the app launching dMotion under
+**System Settings → Privacy & Security → Camera**, then restart that app if needed.
+`make sound` tests audio separately. A generated beep works without an audio file;
+put your own clip at `assets/motion_detected.wav` to replace it.
+
+## Use a trained checkpoint
+
+Use a YOLO26m detection checkpoint trained on a single class named `cash` or the
+legacy `money_spread`. Both names represent visible cash. A generic multiclass
+checkpoint is rejected rather than sounding the alert for unrelated objects.
+
+If someone supplies a cash checkpoint, place it at `models/cash-yolo26m.pt`:
+
+```sh
+mkdir -p models
+cp /path/to/your/cash-best.pt models/cash-yolo26m.pt
 make prepare
 make run
 ```
 
-After setup you can also double-click `start.command` in Finder. The first model
-preparation downloads detector and text-encoder weights (several hundred MB in
-total). Subsequent runs reuse local files. `make prepare` verifies model inference
-without opening your camera or playing audio.
+Replace example paths with your actual file paths. `prepare` loads that checkpoint
+and runs inference on a blank image without using the camera or audio. It does
+not download a cash model or train one. `run` opens the webcam. After setup and
+checkpoint selection you can also double-click `start.command` on macOS.
 
-On macOS, allow Camera access for the app running the command (Terminal or Codex)
-under **System Settings → Privacy & Security → Camera**. Restart that app if needed.
-
-## Test the basic experience
-
-```sh
-make diagnose # Real model + common objects; stand in view to check detection.
-make demo    # Camera + manual box; no model needed. Press T to simulate.
-make sound   # Play the configured alert once.
-make doctor  # Check config, dependencies, and asset paths.
-```
-
-You can also double-click `diagnose.command` in Finder, or run
-`.venv/bin/dmotion run --mode check`. Check mode uses the same pretrained detector
-with prompts for person, cell phone, cup, bottle, and book at confidence `0.25`.
-It draws boxes from real model results. Detecting you or one of these objects
-confirms that the camera-to-model pipeline works. If check mode works but money
-mode misses your cash, the money prompts or pretrained model are the likely issue.
-Money mode remains the default: use `make run` or `--mode money` to return to it.
-
-For a more sensitive cash test, close check mode with Q, then double-click
-`test-money.command` in Finder (or run `make test-money`). It uses the original
-model with the prompt `paper money` at confidence `0.10`, image size `640`, on CPU.
-The larger image raised the uploaded euro photo's score from `0.115` to `0.170`;
-live detection can still miss, and it can trigger on unrelated objects.
-Hold cash clearly in view for two seconds, remove it, then show empty hands and
-cards to check for false alarms. Try a fan, stack, and single bill separately.
-Press T to test sound and
-S to save a missed example. This shortcut uses the original text-prompt model.
-
-The overlay shows model warm-up, whether the model is running, and the number of
-processed frames. After warm-up, it distinguishes no objects, detected objects,
-and results that are too slow to display. A rising frame count with no objects
-means inference is running even when nothing matches the prompts. In demo mode,
-the manual box checks the display and sound only.
-
-In the camera window:
+Hold cash clearly in view, remove it, and then show empty hands, cards, receipts,
+and your shirt. Check a fan, stack, and single note. Boxes should follow cash, and
+cash-free scenes should stay quiet. Camera controls:
 
 | Key | Action |
 | --- | --- |
 | Q / Escape | Quit |
-| M | Toggle sound |
-| T | Test sound; in demo mode also show a simulated box |
-| S | Save a raw test photo in `data/` |
+| M | Toggle audio |
+| T | Test audio; simulate a box in demo mode |
+| S | Save an unannotated test photo in `data/photos/` |
 
-A generated beep works immediately. To use the actual "motion detected" clip,
-put it at `assets/motion_detected.wav`. The clip is not bundled.
+By default, three consecutive positive model results play the alert. Holding cash
+in view does not replay it continuously. Remove it for one second to rearm; a
+three-second cooldown also applies. The overlay shows processed-frame count,
+inference time, device, and whether results are fresh. One background worker
+keeps old frames from building up; results older than two seconds are discarded.
 
-## Test a photo first
+## Test photos and choose another checkpoint
 
-Put a photo in `data/photos/`, then run:
+Keep original photos in `data/photos/`. A photo test prints labels, scores,
+pixel boxes, and inference time, and saves an annotated copy under `outputs/`.
+It does not play the alert.
 
 ```sh
-make image IMAGE="data/photos/spread.jpg"
-# Optional preview and prompt overrides:
-.venv/bin/dmotion image data/photos/spread.jpg --show --prompt "a fan of banknotes"
-# Check a photo containing a person, phone, cup, bottle, or book:
-.venv/bin/dmotion image data/photos/person.jpg --mode check --show
+make image IMAGE="data/photos/cash.jpg"
+.venv/bin/dmotion image data/photos/cash.jpg --show
 ```
 
-The annotated copy goes into `outputs/`. The command also prints detection labels,
-scores, coordinates, and inference time. It does not play the alert.
-You can verify model loading and inference without a camera using
-`.venv/bin/dmotion prepare --mode check`.
+To test a candidate or a checkpoint returned by an external training run:
 
-## Tune detection
+```sh
+.venv/bin/dmotion prepare --model /path/to/candidate.pt
+.venv/bin/dmotion image data/photos/cash.jpg --model /path/to/candidate.pt --show
+.venv/bin/dmotion run --model /path/to/candidate.pt --confidence 0.55
+```
 
-Edit `config.toml`, or copy it to `config.local.toml` for untracked experiments:
+`0.55` is a starting setting, not a universal optimum. Select confidence for each
+checkpoint on validation sessions. A larger or newer filename does not establish
+better accuracy. Keep checkpoints and their SHA-256 hashes/reports together.
+`--model` selects the exact file; it does not rename, retrain, or promote it.
+The old `--mode money` and `--mode trained` options are equivalent compatibility
+aliases and preserve your configured checkpoint.
+
+For a persistent local selection:
 
 ```sh
 cp config.toml config.local.toml
+# Edit detector.model and detector.confidence in config.local.toml.
 .venv/bin/dmotion run --config config.local.toml
-.venv/bin/dmotion run --confidence 0.15 --prompt "banknotes"
-.venv/bin/dmotion run --device cpu --camera 1 --mute
 ```
 
-- Lower confidence accepts more guesses; increase it if you get false triggers.
-- `--mode trained` uses the separately calibrated `trained_confidence = 0.175`.
-  Pass `--confidence` to override that value for one test run.
-- `--prompt` replaces the defaults; repeat it to test multiple descriptions.
-- `--device cpu` runs inference on the processor. `--device mps` uses the Apple GPU;
-  `--device auto` selects the available accelerator. CPU is a compatibility option,
-  not an accuracy setting.
-- `--image-size 640` overrides `image_size`; use a multiple of 32. Larger images can
-  expose more detail but take longer to process.
-- `overlay.solid_box = true` covers detections with a filled white rectangle.
-- `trigger` settings control confirmation, absence before rearming, and cooldown.
-- Paths in a config file are relative to that file's folder.
+Paths inside a config are relative to that config's directory. `--model` follows
+the same rule. `config.local.toml` is ignored by Git. Older local configs must
+remove unused `prompts`, `reference`, `reference_confidence`, and
+`trained_confidence` entries and set `backend = "trained"`.
 
-The audio fires after three consecutive positive model results. Holding cash in
-view does not replay it continuously. Remove it for at least one second to rearm;
-a three-second cooldown also applies. One background inference worker keeps the
-preview responsive and avoids queuing old frames. Results older than two seconds
-are discarded; increase `camera.max_result_age_seconds` if your device is slower.
+## Collect and review a dataset
 
-## Train it to recognize displayed cash
-
-To create labels from recorded videos with AI, see the
-[automatic video labeling workflow](docs/TRAINING.md#use-ai-to-suggest-boxes-from-videos).
-`make auto-label` proposes cash boxes for review; the labeler accepts money fans,
-stacks, and single bills for the broader cash-display task. AI drafts do not enter
-training until accepted, and previously reviewed pictures are preserved.
-
-Training means showing the model photos and marking where the cash is.
-Downloading photos alone does not teach it anything: review each photo and draw
-one tight box around each cash bundle or single bill. For a fan or stack, include
-all its banknotes in one box. Mark photos without cash as negative examples,
-including cards, receipts, phones, and empty hands.
+The workflow is **collect/import → review → split sessions → train → validate →
+test → select a checkpoint**. Images and labels stay local during these commands.
+Original files are copied into the dataset; its `manifest.json` stores review
+status, pixel boxes, source hashes, and session groups.
 
 ```sh
-make fetch    # Download the included starter image sources for review.
-make collect  # Capture a short webcam session as photos, roughly one per second.
-make label    # Open the local labeling page in your browser.
-make dataset  # Show how many photos have been reviewed.
-make train    # Build separate training/validation/test sets and train the model.
-make trained  # Test the trained model with the webcam.
+mkdir -p data/videos data/photos
+make collect
+.venv/bin/dmotion collect --seconds 20 --interval 1 --kind negative
+.venv/bin/dmotion import data/videos/session-one.mov --interval 1
+.venv/bin/dmotion import data/photos --group independent-photo-session
+make label
+make dataset
 ```
 
-The reviewed photos are in `data/training/images/`. Their statuses and pixel
-boxes are recorded in `data/training/manifest.json`. The browser labeler is the
-easiest way to see the photo and its box together:
+Capture cash at different distances and angles, including fans, stacks, and
+single bills. Include empty hands, shirts, cards, phones, receipts, and cash
+moving out of frame. `--kind positive/negative` describes a recording's intent;
+all captured frames still start **unreviewed**.
+
+The labeler opens a local browser page at `127.0.0.1`:
+
+| Control | Review decision |
+| --- | --- |
+| Save cash + next | Save one tight box per visible cash bundle or separate bill |
+| No cash + next | Explicitly save a negative with no boxes |
+| Skip + next | Exclude a blurry, ambiguous, or irrelevant frame |
+| Clear boxes / Undo box | Correct boxes before saving |
+| Previous / Next / Next unreviewed | Navigate and check progress |
+| Finish labeling | Finish the session and stop the local server |
+
+Keep boxes around the notes rather than the person or shirt. Save the decision
+before moving on. An empty unreviewed frame is never automatically a negative.
+Revisit a previously saved frame to correct it.
+
+If you already have a cash-trained YOLO26m checkpoint, it can suggest boxes:
 
 ```sh
-.venv/bin/dmotion label --dataset data/training
+.venv/bin/dmotion auto-label --model /path/to/cash-checkpoint.pt --confidence 0.2
+make label
 ```
 
-After `make train`, the exported copies are in `data/yolo/images/train/`,
-`data/yolo/images/val/`, and `data/yolo/images/test/`; the matching normalized
-YOLO label files are in the folders with the same names under `data/yolo/labels/`.
+Suggestions remain drafts, including frames with no detections. Review missed
+cash as well as incorrect boxes. Existing reviewed records and pending drafts
+are preserved. Rerunning after interruption rebuilds the complete report and
+contact sheets from saved drafts without repeating their inference. Reports and
+contact sheets go to `outputs/video-autolabel/`. Open the sheet paths listed in
+`report.json`; each published set has its own folder under `contact-sheets/`.
+`predictions.json` saves draft progress; `report.json` describes the last published set.
+Rebuilds keep the previous set intact until the new report is saved, then remove
+obsolete generated pages after partial human review.
+After the final image is reviewed, rerun `auto-label` to publish zero pending
+records and remove the obsolete sheets. An empty rebuild needs no model or vision dependencies.
+Rebuilds reconcile reviews saved during inference before publishing their audit.
+While sheets are being rebuilt, a new review save can wait until publication finishes.
+No separate labeling model or text encoder is required. Training refuses pending
+AI suggestions until you explicitly choose cash, no cash, or skip.
 
-You can also double-click `collect.command`, `label.command`, `train.command`,
-and `trained.command` in Finder. Collection and downloads create **unreviewed**
-photos; they are excluded from training until you label them. Google examples are
-a small starter set. Add your own euros, lighting, camera angles, and backgrounds
-to make the model useful on your laptop.
+Video import keeps each recording together. **Related videos from one physical
+session must also stay in the same split.** The manifest's `group` is the source
+of truth; inspect and align related recording groups before export. The video
+import command does not accept `--group`. Independent sessions need distinct
+groups, so adjacent frames cannot appear in training and evaluation.
 
-The local dataset currently contains 97 reviewed photos: 44 positive cash photos
-and 53 cash-free photos. It includes the original photos, reviewed video frames,
-manually checked cash-free crops from the false-alarm screenshots, and two full
-webcam examples queued for the next retraining run. Eight ambiguous or blurry
-records remain excluded. Original images and review decisions are preserved
-locally. This remains a small experiment that needs more varied webcam sessions.
+`make fetch` optionally downloads the starter list in
+`examples/money-spread-sources.json`; downloads still need review. Webcam sessions
+matching your intended use are more useful than many nearly identical frames.
 
-The training setup now updates weights every batch and records actual optimizer
-updates. It refuses to replace the model if there were no updates at a positive
-learning rate. Each run records the exact photos, splits and learning updates.
-`make trained` loads the latest completed model; `make test-money` uses the
-original prompt detector.
+## Train YOLO26m and evaluate the candidate
 
-The active hard-negative model was trained and checked on 3 October 2026 using
-95 of those reviewed photos. On its validation split it matched all 13 cash
-images and produced no boxes on 16 cash-free images at the calibrated threshold.
-It still misses some wider or darker held-out scenes, and its box can include
-the person when the cash is small. Two full webcam examples are queued for the
-next retraining run. Run `make trained` and see the [saved training results](docs/TRAINING_RUN_2026-10-03.md)
-for exact checks.
-
-Record at least three separate sessions containing cash, plus sessions without
-cash. The workflow keeps each session together when splitting the data,
-so neighboring frames do not appear in both training and testing. Aim initially
-for roughly 100–200 varied positive photos and a similar number of negatives;
-that is a starting target, not an accuracy guarantee. Training explains what is
-missing if there are too few reviewed groups.
-
-`make trained` needs a successfully trained `models/money-spread.pt`. `make run`
-still runs the original prompt model, and `make diagnose` checks common objects.
-Follow the [step-by-step training guide](docs/TRAINING.md) for labeling, importing
-videos, adding download sources, and interpreting the results.
-
-When a shirt or another object triggers falsely, press `S` in the camera window
-to save that exact frame, press `Q`, and import the newest saved photo as a
-negative example:
+Review at least **three independent groups containing cash**, with cash-free
+examples spread across those sessions. Export needs separate training,
+validation, and test groups. Check `make dataset` first. Small datasets can check
+the workflow but do not establish useful accuracy.
 
 ```sh
-# Organize loose uploads and camera snapshots first.
-make organize-media
-latest=$(ls -t data/photos/test-*.jpg | head -1)
-.venv/bin/dmotion import "$latest" --dataset data/training --group shirt-false-positive
-.venv/bin/dmotion label --dataset data/training
+make build-dataset
+.venv/bin/dmotion train --epochs 30 --patience 10 --batch 2 --device auto
 ```
 
-Choose **No cash + next** for that frame. Saving the photo alone does not change
-the model; it must be reviewed as a negative and included in a later training run.
+Training initializes from `models/yolo26m.pt`, downloading the generic pretrained
+YOLO26m checkpoint if necessary. It fine-tunes for the reviewed cash class; it
+does not resume your currently running training job. A run updates weights only
+from the training split; validation chooses the best checkpoint. `batch` also
+sets gradient accumulation's nominal batch size so small datasets receive actual
+optimizer updates. A run with no updates at a positive learning rate is rejected.
 
-## Maintenance
-
-```sh
-make check   # Lint, formatting, and automated core tests
-make format  # Apply formatting fixes
-```
-
-Dependencies are declared in `pyproject.toml` and pinned, including transitive
-dependencies, in `uv.lock`. Commit both files when changing dependencies. See
-[development notes](docs/DEVELOPMENT.md) for the Git workflow and dependency updates.
-GitHub Actions runs the same core checks when the repository is hosted on GitHub.
-
-Implementation agents automatically document completed features, run checks,
-commit task files, push a `feature/<name>` branch, and create or update a PR into
-`develop`. You do not need to request those completion steps each time. See the
-[automatic Git workflow](docs/GIT_WORKFLOW.md) for the branch rules, local hooks,
-and one-time Codex review setting. Merging remains a separate decision.
+Candidates are saved in a unique `outputs/yolo26m-training/cash-.../` folder:
 
 ```text
-src/dmotion/        App, configuration, detector, alert, trigger logic
-tests/             Core tests that do not need a camera or downloaded models
-config.toml        Shared defaults
-assets/            Your alert clip
-models/            Detector weights (ignored)
-weights/           Text-encoder weights (ignored)
-data/videos/       Original user recordings (ignored)
-data/photos/       Original test photos and screenshots (ignored)
-data/training/     Dataset-owned frame copies and reviewed labels (ignored)
-outputs/           Annotated results (ignored)
+weights/best.pt           Best checkpoint selected using validation
+candidate.pt             Separate candidate for inspection
+candidate.json           Model identity, checkpoint hashes and run settings
+training-info.json       Same run report
+dataset-provenance.json  Reviewed records and group assignments
+results.csv / args.yaml  Ultralytics training evidence
 ```
 
-Inference and training stay on the laptop. During normal detection, S saves a
-single photo when you request it; the separate collection command saves a short
-sequence for labeling. Weights, photos, outputs, environments, and caches are
-excluded from version control.
+`make train` never overwrites the live `models/cash-yolo26m.pt`. It deliberately
+leaves the test split unevaluated. Choose confidence on validation frames first,
+then freeze it and assess the candidate once on held-out test sessions. For a
+repeatable model-level check after freezing the threshold:
+
+```sh
+.venv/bin/yolo detect val model=/path/to/candidate.pt data=data/yolo/dataset.yaml split=test conf=0.55 imgsz=640 device=cpu
+.venv/bin/dmotion run --model /path/to/candidate.pt --confidence 0.55
+```
+
+Replace `0.55` with your selected value. Inspect tight-box precision/recall,
+cash-free false-positive frames, missed cash, and inference time. Ultralytics mAP
+alone does not measure the repeated-frame audio trigger. Rehearse new webcam
+conditions too. Keep test sessions out of retraining; once used to guide changes,
+they are no longer a blind test. Preserve exports and reports before rebuilding.
+
+When you choose a candidate for normal use, set `detector.model` to its path in
+`config.local.toml` and retain its JSON report. Alternatively copy the selected
+candidate and report to `models/cash-yolo26m.pt` and `models/cash-yolo26m.json`.
+Use a separate output folder for each external/Colab training run, download its
+checkpoint/report, and select it with the same `--model` commands. The CLI here
+trains locally; it does not create or manage a cloud training job.
+
+## Configuration and tuning
+
+Command-line overrides apply for one invocation:
+
+```sh
+.venv/bin/dmotion run --confidence 0.65 --device cpu --camera 1 --mute
+.venv/bin/dmotion image data/photos/cash.jpg --image-size 640 --device mps
+```
+
+| Config setting | Purpose |
+| --- | --- |
+| `detector.model` | Exact cash checkpoint file |
+| `detector.confidence` | Minimum score; lower values can increase misses caught and false alarms |
+| `detector.image_size` | Detail versus processing time; use a multiple of 32 |
+| `detector.device` | `auto`, `cpu`, `mps` for Apple GPU, or `cuda:0` |
+| `camera.index`, `width`, `height`, `mirror` | Camera and preview settings |
+| `camera.max_result_age_seconds` | Discard stale inference rather than display old boxes |
+| `trigger.consecutive_hits`, `reset_seconds`, `cooldown_seconds` | Alert confirmation and rearming |
+| `audio.enabled`, `file`, `volume` | Sound settings, with generated-beep fallback |
+| `overlay.solid_box` | Filled white rectangle instead of outline |
+
+False alarms need reviewed examples and evaluation, not just more epochs.
+Save a problematic frame with **S**, then import that file, review it, and include
+its physical recording group in a later training run. Retain fresh sessions for
+an honest comparison.
+
+## Commands and project files
+
+| Command | Purpose |
+| --- | --- |
+| `make setup`, `make doctor` | Install locked dependencies / inspect setup |
+| `make demo`, `make sound` | Camera/display demo / audio test |
+| `make prepare`, `make run`, `make image IMAGE=...` | Warm up, camera detection, photo detection |
+| `make collect`, `dmotion import`, `make fetch` | Capture, import, or download examples |
+| `make auto-label`, `make label`, `make dataset` | YOLO26m drafts, human review, counts |
+| `make build-dataset`, `make train` | Export grouped labels / train a separate candidate |
+| `make organize-media ARGS='--dry-run'` | Preview sorting loose media |
+| `make organize-media` | Move loose media with a checksum journal |
+| `make check`, `make audit`, `make package-check` | Core tests/security, dependency audit, package smoke test |
+
+Make targets for inference, collection, training and labeling accept `ARGS`, for
+example `make run ARGS='--config config.local.toml'`. The exact options are in
+`.venv/bin/dmotion --help` and `.venv/bin/dmotion COMMAND --help`.
+
+```text
+src/dmotion/          Runtime, data review and YOLO26m training code
+tests/               Tests requiring no camera, audio device or model download
+scripts/             Setup, checks, publication and media tools
+scripts/macos/       Finder shortcuts for collection, review and training
+docs/                Developer notes, file map and reliability requirements
+docs/archive/        Historical model experiments, clearly marked inactive
+examples/            Optional download source list
+config.toml          Shared YOLO26m defaults
+config.local.toml    Your checkpoint selection (ignored)
+assets/              Optional alert audio
+models/              Selected cash checkpoint and generic YOLO26m initialization
+data/videos/         Original recordings
+data/photos/         Original photos and camera snapshots
+data/training/       Dataset-owned image copies and review manifest
+data/yolo/           Exported images, labels and group report
+outputs/             Candidates, training runs, comparisons and annotated previews
+```
+
+Keep datasets, checkpoints, reports and source provenance backed up separately;
+Git excludes them. Media organization preserves contents and labels. Old run
+folders may still contain datasets used by current experiments: inspect their
+references before moving them. Retired source remains available through Git
+history; historical notes are in `docs/archive/`.
 
 ## Troubleshooting
 
 | Problem | Try |
 | --- | --- |
-| Cannot open camera | Check macOS permission, close other camera apps, try `--camera 1` |
-| First launch is slow | Run `make prepare`; initial downloads and warm-up take time |
-| No money detection | Run `make diagnose` and stand in view; if it detects you, test a clear close-up money photo, different prompts, or lower confidence |
-| Cards or background objects trigger | Add reviewed examples of those objects with no cash boxes, then train again |
-| Preview works but boxes never appear | Check model status and processed-frame count; if results are too slow, try a smaller `image_size` or increase the maximum result age |
-| MPS error | Run with `--device cpu` |
-| No audio | Run `make sound`, check volume/output device, verify your WAV file |
-| System Python is too old | Install Python 3.11–3.13 or set `DMOTION_PYTHON=/path/to/python` for setup |
+| Python too old/new | Use Python 3.11–3.13; set `DMOTION_PYTHON` for setup |
+| No cash checkpoint | Supply `--model`, select it in local config, or collect/review/train; use demo first |
+| Unexpected config fields | Migrate old prompt/reference config as described above |
+| Checkpoint has other classes | Use your single-class cash-trained YOLO26m, not generic COCO weights |
+| Camera cannot open | Check permission, close other camera apps, try `--camera 1` |
+| MPS/device error | Retry inference or training with `--device cpu` |
+| Training runs out of memory | Use `--batch 1`; close other GPU-heavy apps |
+| Too few groups/pending labels | Review cash/no-cash/skip decisions and add independent sessions |
+| Cash missed / clothing triggers | Review tight boxes and domain-matched negatives; calibrate on validation |
+| Boxes absent with frame count rising | Inspect scores, detail, timing, and stale-result warnings |
+| No audio | `make sound`, T, output volume/device, and audio file path |
+| First training launch slow | Pretrained download and warm-up need time; later runs reuse the cache |
 
-Model API reference: [Ultralytics YOLO-World](https://docs.ultralytics.com/models/yolo-world/).
+## Development
 
-New uploads can be placed in `data/videos/` or `data/photos/` directly.
-`make organize-media` sorts loose media from the root and `data/`, preserving
-filenames, checksums and existing labels. See [file layout](docs/FILE_LAYOUT.md).
-The [YOLOE fine-tuning note](docs/YOLOE_FINETUNING.md) explains how the existing
-reference model differs from the current custom-training model.
+For core development without heavy vision packages, install
+[uv](https://docs.astral.sh/uv/getting-started/installation/), then run:
+
+```sh
+uv sync --locked --python 3.11
+make setup-workflow
+make check
+```
+
+If setup has already installed uv locally, use `.tools/bin/uv` instead of `uv`.
+Core-only sync removes optional vision packages from that environment; use
+`make setup` before a camera/model check. Keep dependency changes in both
+`pyproject.toml` and `uv.lock`. Core tests cover software behavior; they do not
+prove model accuracy or hardware readiness.
+
+The call path is `cli.py → config.py → app.py → detector.py → monitor.py → trigger.py`
+with `audio.py` playing the alert. Training is `cli.py → dataset.py → training.py`;
+labeling uses `collect.py`, `autolabel.py`, and `labeler.py`.
+See the [developer file map](docs/FILE_LAYOUT.md), [development guide](docs/DEVELOPMENT.md),
+[Git workflow](docs/GIT_WORKFLOW.md), and [reliability gates](docs/AI_RELIABILITY.md).
+Model loading and training capture a private checkpoint snapshot and record the
+SHA-256 of those exact bytes, so replacing the source checkpoint during a run
+cannot misidentify its weights. Snapshots are cleaned up after loading or training;
+training keeps its snapshot available until the run finishes.
+
+The pipeline runs tests, security scans, package checks, and PR policy. It does not
+request or require AI code review. Disable the separate repository automatic-review
+toggle in [Codex settings](https://chatgpt.com/settings/code-review) to prevent
+account-triggered reviews from consuming tokens. Existing review findings still
+need resolution before merging.
+
+Features use PRs into `develop`; `main` holds released code. Model/default changes
+need an explicit user choice. No publication license has been selected; review
+dependency and data terms before distribution.

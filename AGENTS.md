@@ -30,25 +30,25 @@ An explicit user instruction to keep work local, pause, or skip publication wins
   The script checks, commits, pushes, and creates/updates a PR into `develop`.
   Feature-branch pushes and PR creation/updates are authorized for these tasks;
   do not ask for a second confirmation solely to perform them.
-- Watch the PR's CI while the task is active. Inspect review results. Fix actionable
-  findings in scope, rerun completion, and monitor the updated commit. If review
+- Watch the PR's CI while the task is active. Inspect any existing review findings. Fix actionable
+  findings in scope, rerun completion, and monitor the updated commit. If CI
   access, credentials, or an external result is unavailable, report the specific
   blocker and PR URL. Never claim a pending review has passed.
 - Attach created or worked-on PRs to the chat with the Codex artifact tool.
-- Post repository PR comments and trigger reviews when needed for the authorized
-  development task without asking for another confirmation.
+- Post repository PR comments when needed for the authorized development task.
+  Do not request AI reviews unless the user explicitly asks for a particular review.
 - Never force-push, bypass push hooks or branch protections, or push directly to
   `main` or `develop`. Keep datasets, weights, outputs, credentials, and unrelated
   work out of commits. Check before staging; never use `git add .` or `git add -A`.
 - Automatically create, push, and update feature, release, and hotfix PRs
   without asking again. Merge automatically only when required CI and
-  security checks pass, AI review covers the latest commit, and blocking
-  findings are resolved. Missing or pending review blocks merging.
+  security and PR policy checks pass, and existing blocking findings are resolved.
+  AI review is optional and is not a merge requirement.
   Use PRs into protected develop/main branches and synchronize release
   changes back into develop. Never bypass protections or force-push.
   Tagging and production deployment require separate authorization.
   See `docs/GIT_WORKFLOW.md` for commands and the difference between automatic
-  completion, local hooks, GitHub checks, and the separate Codex review setting.
+  completion, local hooks, GitHub checks, and optional manual code review.
 
 ## Code Review Rules
 
@@ -68,13 +68,3 @@ An explicit user instruction to keep work local, pause, or skip publication wins
 
 See `docs/AI_RELIABILITY.md` for gate thresholds, retained evidence, and the
 separate requirements for model evaluation, hardware acceptance, and delivery.
-
-## Independent review completion format
-
-When independently reviewing this repository, report findings normally. Only
-when the review is actually complete and clean, post a standalone result using
-`docs/schemas/codex-review-result.schema.json` and the schema v1 example in
-`docs/GIT_WORKFLOW.md`. Include the full reviewed commit SHA; do not add a
-closing sentence or prose to the JSON result. The native About Codex footer is
-optional. Incomplete/failed reviews must never claim completed/clean.
-Implementation agents must not author or impersonate independent bot results.

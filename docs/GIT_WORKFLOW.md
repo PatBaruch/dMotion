@@ -7,7 +7,7 @@ requests do not publish code; an explicit instruction to keep a task local wins.
 
 This is a repository workflow, not a timer watching every edit. The agent invokes
 the completion command while working. Git hooks run on pushes, and GitHub runs
-CI/review after publication. These instructions do not grant permissions to other
+CI after publication. These instructions do not grant permissions to other
 repositories or override an agent's sandbox/network controls.
 
 ## Branches
@@ -72,18 +72,17 @@ rerun after repairing the label.
 Rerunning after a partial failure preserves the commit and reuses an open PR.
 `make finish-feature ARGS='...'` exposes the same command.
 
-Completion requests native Codex review once for the current opted-in PR head,
-using a comment with the full SHA. Existing trusted requests for that SHA are
-deduplicated. An unavailable service or failed request is reported with the
-already-published PR preserved; it never counts as review completion.
+Completion does not request AI review or post review-trigger comments. Tests,
+security scans, PR policy, and protected Gitflow promotion run automatically.
+AI review is optional and must be explicitly requested by the user.
 
-The PR records the tested commit and local check results. CI and review status
+The PR records the tested commit and local check results. CI status
 remain pending until GitHub reports them. PR descriptions must explain the change,
 documentation updates, validation, and risks/limitations. The PR policy checks the
 presence of substantive sections and Gitflow routing; it cannot judge whether
 the prose fully explains the feature.
 
-## Enforcement and review
+## Enforcement and optional review
 
 - `.githooks/pre-push` blocks direct pushes/deletions to `main` and `develop`,
   refuses dirty worktrees or pushes of another branch's commit, rejects branch
@@ -97,30 +96,32 @@ the prose fully explains the feature.
   Editing the description reruns this check. Its source is the trusted default
   branch, so changes to that policy require promotion to `main` to take effect.
   Verified Dependabot PRs use their own generated documentation.
-- Protected branches require `test`, `pr-policy`, and `ai-review`, an up-to-date
-  branch, resolved review
-  conversations, and PR-based changes. Force pushes/deletions and administrator
+- The protection template requires `test` and `pr-policy`, an up-to-date
+  branch, resolved review conversations, and PR-based changes. Force pushes/deletions and administrator
   bypasses are disabled. The solo-maintainer setup uses zero mandatory approving
   reviews: GitHub does not allow the PR author to approve their own PR. Add one
   required approval when an independent reviewer is available.
-  The exact remote configuration is stored in `.github/branch-protection.json`;
-  required checks accept results from the verified GitHub Actions app.
-- Codex PR review needs its separate account setting: connect `PatBaruch/dMotion`,
-  enable repository code review, turn on automatic review for the desired PRs,
-  and choose a trigger covering updates to the PR. Configure personal preferences
-  too if the repository follows those preferences. Repository rules live in
-  `AGENTS.md`. Account settings cannot be enabled by a Git push.
+  The intended configuration is stored in `.github/branch-protection.json`;
+  storing that file does not apply it to GitHub. Verify the live requirements
+  separately during rollout; automation cannot enforce an omitted required check
+  on another authorized merger.
+  Required checks accept results from the verified GitHub Actions app.
+- Codex has a separate account-level automatic-review setting. To prevent reviews
+  from consuming tokens outside Actions, turn off automatic review for
+  `PatBaruch/dMotion` in [Codex code review settings](https://chatgpt.com/settings/code-review).
+  Repository changes do not change that account setting. Manual reviews remain
+  available when explicitly requested.
 
 While active, the agent watches CI, reads review results, fixes actionable issues,
 and reruns completion. A stopped chat is not a background repair service; GitHub
-CI, reviews, and the deployed Gitflow loop still run, but code fixes need an active
-agent. Repository PR comments and review triggers needed for the task are authorized.
+CI and the deployed Gitflow loop still run, but code fixes need an active
+agent. Repository PR comments needed for the task are authorized; AI review triggers require
+an explicit user request.
 
 The current `AGENTS.md` authorizes feature, release, and hotfix publication and
 gated merging without another reminder. Merge only when the required CI/security
-checks pass, AI review covers the current head commit, and blocking findings are
-resolved. Missing, pending, failed, or stale reviews block merging. Tagging and
-production deployment still require separate authorization.
+and PR policy checks pass and existing blocking findings are resolved. Missing
+AI reviews do not block merging. Tagging and production deployment still require separate authorization.
 
 ## Trusted merge and promotion loop
 
@@ -130,96 +131,22 @@ privileged job checks out only `main` and runs `scripts/gitflow_automation.py`.
 It never executes PR code or downloaded artifacts. PR strings are JSON data,
 never shell commands. External Actions use pinned SHAs.
 
-The workflow publishes `ai-review` on the exact head. It accepts a submitted
-`APPROVED` or recognized `COMMENTED` review from the authenticated Codex connector
-bot, matching its login, immutable user ID, type, and the current `commit_id`.
-Legacy formal `COMMENTED` results must match the complete observed native heading,
-reviewed-commit marker, and About Codex footer after whitespace normalization.
-A heading alone cannot validate malformed JSON or additional review prose.
-An empty submitted `APPROVED` review is also accepted through its formal state.
-The requested machine-readable completion contract is defined in
-[Codex review result schema v1](schemas/codex-review-result.schema.json).
-The review request includes the exact JSON example generated by the same code
-that validates the response. Only the authenticated independent Codex bot may
-provide completion evidence; implementation agents must never fabricate it.
+The workflow publishes only `pr-policy` for branches created by its token.
+It checks `test` and `pr-policy` from the verified GitHub Actions app on the exact
+head commit. It never posts `@codex review`, parses AI completion comments, or
+publishes an `ai-review` check. Absent, stale, malformed, or quota-failed AI
+completion messages are irrelevant to merge eligibility.
 
-A completed clean result is a standalone message with this exact structure:
-
-````text
-<!-- dmotion-review-result:v1 -->
-```json
-{
-  "schema_version": 1,
-  "reviewed_commit": "0123456789abcdef0123456789abcdef01234567",
-  "status": "completed",
-  "conclusion": "clean",
-  "blocking_findings": 0
-}
-```
-````
-
-Use the actual full 40-character reviewed commit SHA. All five fields are required;
-unknown fields, duplicate JSON keys, wrong types, and unsupported versions fail.
-Only `completed` + `clean` + zero blocking findings passes. Incomplete/failed
-reviews use `incomplete`/`failed` status and `unavailable` conclusion; findings
-are reported normally and must be resolved before clean completion. No prose may
-precede or follow the JSON result, except the observed native About Codex footer.
-The parser validates footer content while allowing whitespace variations.
-Every authenticated bot comment except the native activity-summary table enters
-event ordering. A newer malformed, markerless, unknown, or incomplete result
-revokes older clean evidence rather than being ignored. Surrounding whitespace
-is accepted for an otherwise valid schema message.
-
-Requests carry a schema-version marker as well as the commit marker, so an older
-request without the contract does not suppress the first schema v1 request.
-A reaction, activity table, or completion request itself cannot supply evidence.
-Native bot formatting is outside this repository's control: if the reviewer
-ignores the requested contract, the gate remains blocked with a format error.
-The JSON path removes dependence on decorative closing sentences when the
-reviewer follows the contract; it does not assume that prompting guarantees it.
-
-Existing native comments remain a strict compatibility path. They require the
-exact first-line clean sentence `Codex Review: Didn't find any major issues.`,
-a known observed decorative closing (or none), one `Reviewed commit` marker,
-and only an optional observed footer. Unknown prose anywhere fails closed.
-The recognized closings are `Swish!`, `:tada:`, `Keep it up!`, `You're on a roll.`,
-`Chef's kiss.`, `Another round soon, please!`, `Already looking forward to the next diff.`, and
-`What shall we delve into next?`. Failure messages and P0/P1 findings anywhere
-block both formats. New integrations should use the JSON contract.
-
-A shortened SHA must
-uniquely identify the current head among the PR's commits; at least ten hexadecimal
-characters are required. The newest bot result must be complete and successful.
-Commit history uses GraphQL cursor pagination rather than the REST endpoint's
-250-commit limit. Incomplete, changing or excessive history fails the affected
-PR's gate; an evidence failure on one PR cannot prevent other eligible PRs from
-being inspected and processed. Such failures are recorded in the workflow output.
-Comments cannot override pending/dismissed/blocking current-head formal reviews.
-Formal reviews include GraphQL update/edit timestamps, matched by REST node identity
-and checked for changes between the two API reads; missing or inconsistent evidence
-blocks the affected PR. Formal reviews for every commit and completion comments
-are compared together by submission/edit time: a late review or an edited
-older-commit result revokes an earlier clean
-current-head result. Every result in the newest one-second timestamp must pass;
-creation IDs cannot resolve ties across reviews, comments or edits. Review and
-comment events refresh the gate; the scheduled loop also rechecks thread resolution.
-Missing, pending, dismissed, stale, unrecognized, quota-failed, or P0/P1-blocking
-results fail. Unresolved threads and outstanding requests for changes also block.
-A toggle, reaction, or connection-error comment cannot pass.
-
-Automatic clean reviews may leave only a thumbs-up on the PR. Since that reaction
-does not identify a commit, the trusted loop requests an explicit native review
-once per managed head when completion is missing or stale. The request includes
-the full SHA and a deduplication marker; only requests from the verified Actions
-bot or repository collaborators suppress duplicates. Draft, closed, fork and
-unmanaged PRs are not requested. Known blocking findings need an active agent
-to resolve them; repeated pulses do not keep requesting the same commit. Native
-account/allowance errors remain blocking and are never treated as approval.
+Optional reviews still carry real objections: unresolved conversations and
+outstanding formal requests for changes block merging. A subsequent comment
+cannot withdraw a request for changes; approval or dismissal can. Review threads
+are read with cursor pagination and unavailable evidence fails closed. Removing
+mandatory AI completion does not erase existing findings or resolve conversations.
 
 Only `gitflow:auto` PRs from this repository are updated or merged. Unlabeled
-PRs are left alone apart from reporting policy/review checks. A newer protected
+PRs are left alone apart from reporting policy checks. A newer protected
 base is merged into a managed task branch without rewriting history; that new
-head needs fresh checks and review. The loop rereads current evidence immediately
+head needs fresh checks. The loop rereads current evidence immediately
 before merging, supplies an atomic head-SHA guard, and relies on GitHub's branch
 protections too. Conflicts, unavailable evidence, and racing commits block merging.
 
@@ -228,21 +155,20 @@ Main commits missing from develop take priority: `hotfix/sync-<main SHA>` return
 them through a PR into `develop`. Captured immutable source/base commits preserve
 ancestry, safe partial creation is resumable, and unexpected branch collisions
 fail. One managed promotion/sync PR prevents duplicates. These PRs need the same
-checks and current-head review; no tag or deployment is created.
+checks and resolved existing findings; no tag or deployment is created.
 
 Token-created PRs can produce approval-required workflow runs. Such runs do not
 count as executed checks or prevent the explicit dispatch. The loop explicitly
 dispatches `Checks` on the managed branch with an expected SHA; it rejects a branch
 that advanced before dispatch. Trusted policy checks are published on that head
 too. Native `allow_auto_merge` stays disabled: the loop performs freshly gated
-merges rather than placing a PR in a CI-only queue. Actions approvals never count
-as AI review. Background automation cannot implement code fixes while the agent
-is stopped.
+merges rather than placing a PR in a CI-only queue. AI review is not required. Background automation cannot implement code fixes while
+the agent is stopped.
 
 ## Initial rollout and prerequisites
 
 Default-branch workflows must reach `main` before background behavior is active.
-Bootstrap through reviewed feature and release PRs. The active agent can inspect
+Bootstrap through tested feature and release PRs. The active agent can inspect
 or merge one PR with the same real-evidence gates:
 
 ```sh
@@ -250,23 +176,22 @@ or merge one PR with the same real-evidence gates:
 .venv/bin/python scripts/gitflow_automation.py --repo PatBaruch/dMotion --pr 7 --merge
 ```
 
-The merge command cannot invent a passing check or bypass a protection. Once
-main's trusted workflow publishes the gate, add `ai-review` to both protected
-branches using `.github/branch-protection.json`, preserving stricter existing
-settings. Never remove an existing required check to complete rollout.
+The merge command cannot invent a passing check or bypass a protection.
+The protection template requires only `test` and `pr-policy`. During migration,
+inspect live protections on both `main` and `develop`. If `ai-review` is still
+required, remove only that context as explicitly requested by the maintainer;
+preserve all other checks, strictness, and conversation-resolution requirements.
+Old `ai-review` results remain historical records and are never rewritten as passes.
 
 GitHub Actions must be permitted to create promotion PRs. GitHub bundles this as
 **Allow GitHub Actions to create and approve pull requests**; enabling it also
 grants approval capability, although this workflow never submits reviews and
-accepts only the independent Codex connector. Default token permissions remain
+does not require any AI reviewer. Default token permissions remain
 read-only. Changing this broader setting needs maintainer approval. If disabled,
 promotion creation is blocked and reported; no local token is copied into secrets.
 
 Enable Dependabot security updates separately. Weekly Dependabot configuration
-and scheduled scans become active on main. Codex needs both the saved automatic
-review setting covering updates and an account GitHub connection authorized for
-dMotion. If `@codex review` asks to connect an account, repair the connection at
-<https://chatgpt.com/codex/cloud/settings/connectors>, then retry review.
+and scheduled scans become active on main.
 
 After rollout, dispatch **Gitflow automation** and **Checks** for immediate
 verification and retain exact-head reports. A manual dispatch demonstrates
@@ -289,4 +214,4 @@ configuration is never a substitute for those actual results.
 
 - [Gitflow branching model](https://nvie.com/posts/a-successful-git-branching-model/)
 - [GitHub branch protections](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-protected-branches/about-protected-branches)
-- [Codex GitHub reviews](https://learn.chatgpt.com/docs/third-party/github)
+- [Optional Codex GitHub reviews](https://learn.chatgpt.com/docs/third-party/github)

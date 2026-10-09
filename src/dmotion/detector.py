@@ -1,4 +1,4 @@
-"""Prompt-based and trained YOLO adapters, loaded only for actual inference."""
+"""YOLO26m cash-checkpoint adapter, loaded only for actual inference."""
 
 import json
 import logging
@@ -6,6 +6,7 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 
+from dmotion.checkpoint import checkpoint_snapshot
 from dmotion.config import AppConfig
 
 logger = logging.getLogger(__name__)
@@ -56,38 +57,36 @@ class MoneyDetector:
     def __init__(self, config: AppConfig):
         prepare_environment(config.root)
         import torch
-        from ultralytics import YOLO, YOLOWorld, settings
+        from ultralytics import YOLO, settings
 
         self.config = config.detector
         self.training_note = ""
         self.device = select_device(self.config.device, torch)
         model_path = config.resolve(self.config.model)
         model_path.parent.mkdir(parents=True, exist_ok=True)
-        # Keep the library's default weights directory stable for the CLIP cache.
         settings.update({"sync": False})
         logger.info("Loading %s on %s", model_path.name, self.device)
-        if self.config.backend == "trained":
-            if not model_path.is_file():
-                raise FileNotFoundError(
-                    "No trained model yet. Review your photos and run make train."
-                )
-            self.model = YOLO(str(model_path))
-            if set(self.model.names.values()) != {"money_spread"}:
-                raise ValueError("The trained model must contain only the money_spread class")
-            report = model_path.with_suffix(".json")
-            if report.is_file():
-                try:
-                    info = json.loads(report.read_text())
-                    count = sum(split["images"] for split in info["splits"].values())
-                    if count < 100:
-                        self.training_note = f"STARTER MODEL: {count} photos. Add webcam examples."
-                        logger.warning(self.training_note)
-                except (ValueError, TypeError, KeyError, AttributeError, OSError):
-                    logger.warning("Could not read the training report: %s", report)
-        else:
-            self.model = YOLOWorld(str(model_path))
-            # Encode vocabulary once on CPU, then move to the runtime device.
-            self.model.set_classes(list(self.config.prompts))
+        if not model_path.is_file():
+            raise FileNotFoundError(
+                "No cash checkpoint at the configured path. Supply --model /path/to/best.pt "
+                "or review your photos and run make train. "
+                "Use make demo to check camera/audio first."
+            )
+        with checkpoint_snapshot(model_path, config.root / ".cache" / "checkpoints") as snapshot:
+            snapshot_path, self.model_sha256 = snapshot
+            self.model = YOLO(str(snapshot_path))
+        if set(self.model.names.values()) not in ({"money_spread"}, {"cash"}):
+            raise ValueError("The trained model must contain a single cash or money_spread class")
+        report = model_path.with_suffix(".json")
+        if report.is_file():
+            try:
+                info = json.loads(report.read_text())
+                count = sum(split["images"] for split in info["splits"].values())
+                if count < 100:
+                    self.training_note = f"STARTER MODEL: {count} photos. Add webcam examples."
+                    logger.warning(self.training_note)
+            except (ValueError, TypeError, KeyError, AttributeError, OSError):
+                logger.warning("Could not read the training report: %s", report)
         self.model.to(self.device)
 
     def predict(self, frame) -> list[Detection]:

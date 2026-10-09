@@ -12,6 +12,8 @@ import random
 import shutil
 import tempfile
 from collections import Counter
+from collections.abc import Iterator
+from contextlib import contextmanager
 from copy import deepcopy
 from functools import wraps
 from io import BytesIO
@@ -146,6 +148,12 @@ class Dataset:
             if record["id"] == id:
                 return record
         raise ValueError(f"No dataset image with ID {id}")
+
+    @contextmanager
+    def locked_records(self) -> Iterator[list[dict]]:
+        """Keep a validated snapshot consistent until its derived artifacts are published."""
+        with self._manifest_lock:
+            yield self.records()
 
     def image_path(self, record: dict) -> Path:
         relative = Path(record["image"])

@@ -1,3 +1,4 @@
+import hashlib
 import json
 import sys
 from pathlib import Path
@@ -20,7 +21,9 @@ def small_dataset(tmp_path):
     return dataset
 
 
-def fake_dependencies(monkeypatch, *, fail_evaluation=False, optimizer_lrs=None):
+def fake_dependencies(
+    monkeypatch, *, fail_evaluation=False, optimizer_lrs=None, on_load=None, on_train=None
+):
     calls = []
 
     class FakeOptimizer:
@@ -40,6 +43,12 @@ def fake_dependencies(monkeypatch, *, fail_evaluation=False, optimizer_lrs=None)
     class FakeYOLO:
         def __init__(self, path):
             calls.append(("load", path))
+            initial = Path(path)
+            initial.parent.mkdir(parents=True, exist_ok=True)
+            if not initial.exists():
+                initial.write_bytes(b"generic YOLO26m initialization")
+            if on_load:
+                on_load(initial)
             self.callbacks = {}
 
         def add_callback(self, event, callback):
@@ -47,6 +56,8 @@ def fake_dependencies(monkeypatch, *, fail_evaluation=False, optimizer_lrs=None)
 
         def train(self, **arguments):
             calls.append(("train", arguments))
+            if on_train:
+                on_train()
             best = Path(arguments["project"]) / arguments["name"] / "weights" / "best.pt"
             best.parent.mkdir(parents=True)
             best.write_bytes(b"trained checkpoint")
@@ -84,39 +95,48 @@ def fake_dependencies(monkeypatch, *, fail_evaluation=False, optimizer_lrs=None)
     return calls
 
 
-def test_training_uses_reviewed_export_and_tests_best_model_before_saving(tmp_path, monkeypatch):
+def test_training_uses_yolo26m_and_saves_candidate_without_evaluating_test(tmp_path, monkeypatch):
     dataset = small_dataset(tmp_path)
     calls = fake_dependencies(monkeypatch)
     destination = train_model(AppConfig(root=tmp_path), dataset.directory, epochs=2, image_size=320)
     assert destination.read_bytes() == b"trained checkpoint"
     info = json.loads(destination.with_suffix(".json").read_text())
-    assert info["test_metrics"] == {"metrics/mAP50(B)": 0.42}
+    assert info["test_evaluated"] is False
+    assert info["model_id"] == "yolo26m.pt"
+    assert info["model_revision"] == f"sha256:{info['pretrained_sha256']}"
+    assert info["active_model_replaced"] is False
+    assert calls[0][1] == str(tmp_path / "models/yolo26m.pt")
     assert info["completed_epochs"] == 2
     assert info["patience"] == 10
     assert info["optimizer_steps"] == info["positive_lr_optimizer_steps"] == 2
     assert info["device"] == "cpu"
     assert info["warnings"]
-    assert [event for event, _ in calls] == ["load", "train", "load", "val"]
-    training = calls[1][1]
-    assert training["workers"] == 0 and training["batch"] == 4 and training["patience"] == 10
+    assert [event for event, _ in calls] == ["load", "load", "train"]
+    training = calls[2][1]
+    assert training["workers"] == 0 and training["batch"] == 2 and training["patience"] == 10
     assert training["nbs"] == training["batch"]
     assert training["imgsz"] == 320 and training["pretrained"] is True
-    assert calls[3][1]["split"] == "test"
-    assert str(Path(info["checkpoint"])) == calls[2][1]
-    assert (tmp_path / "outputs" / "training" / info["run"] / "training-info.json").is_file()
-    provenance = tmp_path / "outputs" / "training" / info["run"] / "dataset-provenance.json"
+    assert (
+        tmp_path / "outputs" / "yolo26m-training" / info["run"] / "training-info.json"
+    ).is_file()
+    provenance = tmp_path / "outputs" / "yolo26m-training" / info["run"] / "dataset-provenance.json"
     assert len(json.loads(provenance.read_text())["records"]) == 3
 
 
-def test_evaluation_failure_does_not_replace_previous_model(tmp_path, monkeypatch):
+def test_successful_training_preserves_live_checkpoint_and_report(tmp_path, monkeypatch):
     dataset = small_dataset(tmp_path)
-    fake_dependencies(monkeypatch, fail_evaluation=True)
-    destination = tmp_path / "models" / "money-spread.pt"
-    destination.parent.mkdir()
-    destination.write_bytes(b"previous model")
-    with pytest.raises(RuntimeError, match="evaluation failed"):
-        train_model(AppConfig(root=tmp_path), dataset.directory, epochs=1)
-    assert destination.read_bytes() == b"previous model"
+    calls = fake_dependencies(monkeypatch)
+    active = tmp_path / "models/cash-yolo26m.pt"
+    active.parent.mkdir()
+    active.write_bytes(b"active cash model")
+    report = active.with_suffix(".json")
+    report.write_bytes(b"existing model report")
+    candidate = train_model(AppConfig(root=tmp_path), dataset.directory, epochs=1)
+    assert candidate != active
+    assert active.read_bytes() == b"active cash model"
+    assert report.read_bytes() == b"existing model report"
+    assert candidate.read_bytes() == b"trained checkpoint"
+    assert not any(event == "val" for event, _ in calls)
 
 
 def test_pending_ai_labels_fail_before_export_or_heavy_imports(tmp_path, monkeypatch):
@@ -128,7 +148,7 @@ def test_pending_ai_labels_fail_before_export_or_heavy_imports(tmp_path, monkeyp
         for path in export_directory.rglob("*")
         if path.is_file()
     }
-    destination = tmp_path / "models" / "money-spread.pt"
+    destination = tmp_path / "models" / "cash-yolo26m.pt"
     destination.parent.mkdir()
     destination.write_bytes(b"previous model")
     metadata = destination.with_suffix(".json")
@@ -194,7 +214,7 @@ def test_explicit_patience_reaches_training_and_metadata(tmp_path, monkeypatch, 
     destination = train_model(
         AppConfig(root=tmp_path), dataset.directory, epochs=1, patience=patience
     )
-    assert calls[1][1]["patience"] == patience
+    assert calls[2][1]["patience"] == patience
     assert json.loads(destination.with_suffix(".json").read_text())["patience"] == patience
 
 
@@ -209,7 +229,7 @@ def test_bad_patience_fails_before_dataset_creation_or_model_import(tmp_path, pa
 def test_no_learning_updates_preserves_existing_model(tmp_path, monkeypatch, optimizer_lrs):
     dataset = small_dataset(tmp_path)
     calls = fake_dependencies(monkeypatch, optimizer_lrs=optimizer_lrs)
-    destination = tmp_path / "models" / "money-spread.pt"
+    destination = tmp_path / "models" / "cash-yolo26m.pt"
     destination.parent.mkdir()
     destination.write_bytes(b"previous model")
     metadata = destination.with_suffix(".json")
@@ -228,3 +248,47 @@ def test_bad_training_arguments_fail_before_export_or_model_import(tmp_path, epo
             AppConfig(root=tmp_path), tmp_path / "dataset", epochs=epochs, image_size=image_size
         )
     assert not (tmp_path / "dataset").exists()
+
+
+@pytest.mark.parametrize("batch", [-1, 0, True, 1.5, 65])
+def test_invalid_batch_fails_before_creating_dataset(tmp_path, batch):
+    with pytest.raises(ValueError, match="batch must be an integer"):
+        train_model(AppConfig(root=tmp_path), tmp_path / "dataset", batch=batch)
+    assert not (tmp_path / "dataset").exists()
+
+
+def test_smaller_batch_reaches_optimizer_accumulation_and_report(tmp_path, monkeypatch):
+    dataset = small_dataset(tmp_path)
+    calls = fake_dependencies(monkeypatch)
+    candidate = train_model(AppConfig(root=tmp_path), dataset.directory, batch=1)
+    assert calls[2][1]["batch"] == calls[2][1]["nbs"] == 1
+    assert json.loads(candidate.with_suffix(".json").read_text())["batch"] == 1
+
+
+def test_training_provenance_hashes_loaded_snapshot_and_keeps_it_for_train(tmp_path, monkeypatch):
+    dataset = small_dataset(tmp_path)
+    original = tmp_path / "models/yolo26m.pt"
+    original.parent.mkdir()
+    original.write_bytes(b"original pretrained weights")
+    loaded = []
+
+    def replace_original(snapshot):
+        replacement = original.with_name("replacement.pt")
+        replacement.write_bytes(b"replacement pretrained weights")
+        replacement.replace(original)
+        loaded.append((snapshot, snapshot.read_bytes()))
+
+    def check_snapshot_during_train():
+        assert loaded[0][0].read_bytes() == b"original pretrained weights"
+
+    calls = fake_dependencies(
+        monkeypatch, on_load=replace_original, on_train=check_snapshot_during_train
+    )
+    candidate = train_model(AppConfig(root=tmp_path), dataset.directory, epochs=1)
+    info = json.loads(candidate.with_suffix(".json").read_text())
+    assert info["pretrained"] == str(original)
+    assert info["pretrained_sha256"] == hashlib.sha256(loaded[0][1]).hexdigest()
+    assert info["model_revision"] == "sha256:" + info["pretrained_sha256"]
+    assert original.read_bytes() == b"replacement pretrained weights"
+    assert [event for event, _ in calls] == ["load", "train"]
+    assert not loaded[0][0].exists()
