@@ -460,11 +460,12 @@ def evaluate_checkpoints(
         }
         _write_json(output / "predictions.json", predictions)
         (output / "report.md").write_text(_markdown(report), encoding="utf-8")
-        _write_json(output / "report.json", report)
         _write_json(
             output / "run.json",
             {"stage": "complete", "verdict": verdict, "active_model_replaced": False},
         )
+        # Publish the canonical completed report last, after every other write succeeds.
+        _write_json(output / "report.json", report)
         return output / "report.json"
     except Exception as error:
         _write_json(

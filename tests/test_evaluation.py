@@ -382,3 +382,20 @@ def test_inference_rejects_decode_failure_and_unrelated_classes(setup, monkeypat
     cv2.imdecode = lambda b, _: SimpleNamespace(shape=(100, 100, 3))
     with pytest.raises(ValueError, match="single-class"):
         evaluation._predict_records(detector, setup.dataset, rows)
+
+
+@pytest.mark.parametrize("failed_file", ["run.json", "report.json"])
+def test_late_publication_error_never_leaves_a_completed_report(setup, monkeypatch, failed_file):
+    fake_inference(monkeypatch, setup)
+    write = evaluation._write_json
+
+    def fail_once(path, value):
+        if path.name == failed_file and value.get("stage") == "complete":
+            raise OSError("Simulated publication failure")
+        write(path, value)
+
+    monkeypatch.setattr(evaluation, "_write_json", fail_once)
+    with pytest.raises(OSError, match="publication"):
+        run(setup)
+    assert not (setup.output / "report.json").exists()
+    assert json.loads((setup.output / "run.json").read_text())["stage"] == "failed"
