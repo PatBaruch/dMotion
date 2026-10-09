@@ -24,6 +24,40 @@ Release tags such as `v0.2.0` are created only for an explicitly requested relea
 Use merge commits for releases and return merges to preserve Gitflow ancestry;
 do not enable a linear-history requirement on these integration branches.
 
+Create a fresh task branch from the current remote base for each new implementation
+task. A distinct task in the same chat gets its own branch and PR. Use a descriptive
+name such as `feature/task-tracking-conventions`; if that name already exists,
+choose another descriptive name rather than reusing its history. Continue fixes
+for the same open task on its existing branch and PR. Completed or merged task
+branches are never reused for a new task. Release and hotfix tasks follow the
+base and destination in the table above.
+
+## Task history and comments
+
+The task branch, conventional commit title, and PR title should describe the same
+piece of work. Keep the PR description current with what changed, why it was
+needed, relevant files, actual validation results, and remaining limitations.
+Link an existing issue or related PR when useful. The PR's four required sections
+provide the overview; progress comments provide the history.
+
+Post a short PR comment when a meaningful implementation or fix is published,
+a blocker changes, or the task completes. Include the commit SHA, concrete changes,
+test results or an Actions run link, and anything still pending. For example:
+
+> Implemented the task branch and PR tracking conventions in AGENTS.md and
+> docs/GIT_WORKFLOW.md at `<commit SHA>`. Local `make check` passed; GitHub CI is
+> pending. No application behavior changed.
+
+Replace placeholders with real evidence when posting. After CI or merging, add
+the actual result; identify any release promotion still pending. Do not describe
+pending checks as passed or repeat comments when the state has not changed.
+The final user update links the PR and identifies its task branch. Source comments
+explain non-obvious choices and constraints; the PR records the work history.
+
+GitHub deletes merged PR branches automatically in this repository. Existing local
+worktrees and branches can remain after that deletion; remove them only after
+checking for uncommitted or unpublished work and preserving needed local artifacts.
+
 ## One-time local setup
 
 GitHub CLI (`gh`), Git, make, and Python 3.11-3.13 are required. This Mac already
