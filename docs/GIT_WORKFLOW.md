@@ -97,18 +97,18 @@ the prose fully explains the feature.
   branch, so changes to that policy require promotion to `main` to take effect.
   Verified Dependabot PRs use their own generated documentation.
 - The protection template requires `test` and `pr-policy`, an up-to-date
-  branch, resolved review
-  conversations, and PR-based changes. Force pushes/deletions and administrator
+  branch, resolved review conversations, and PR-based changes. Force pushes/deletions and administrator
   bypasses are disabled. The solo-maintainer setup uses zero mandatory approving
   reviews: GitHub does not allow the PR author to approve their own PR. Add one
   required approval when an independent reviewer is available.
   The intended configuration is stored in `.github/branch-protection.json`;
   storing that file does not apply it to GitHub. Verify the live requirements
-  separately during rollout; the automation cannot enforce an omitted required check on another authorized merger.
+  separately during rollout; automation cannot enforce an omitted required check
+  on another authorized merger.
   Required checks accept results from the verified GitHub Actions app.
 - Codex has a separate account-level automatic-review setting. To prevent reviews
   from consuming tokens outside Actions, turn off automatic review for
-  `PatBaruch/dMotion` in [Codex code review settings](https://chatgpt.com/codex/settings/code-review).
+  `PatBaruch/dMotion` in [Codex code review settings](https://chatgpt.com/settings/code-review).
   Repository changes do not change that account setting. Manual reviews remain
   available when explicitly requested.
 
@@ -121,8 +121,7 @@ an explicit user request.
 The current `AGENTS.md` authorizes feature, release, and hotfix publication and
 gated merging without another reminder. Merge only when the required CI/security
 and PR policy checks pass and existing blocking findings are resolved. Missing
-AI reviews do not block merging. Tagging and
-production deployment still require separate authorization.
+AI reviews do not block merging. Tagging and production deployment still require separate authorization.
 
 ## Trusted merge and promotion loop
 
@@ -163,8 +162,8 @@ count as executed checks or prevent the explicit dispatch. The loop explicitly
 dispatches `Checks` on the managed branch with an expected SHA; it rejects a branch
 that advanced before dispatch. Trusted policy checks are published on that head
 too. Native `allow_auto_merge` stays disabled: the loop performs freshly gated
-merges rather than placing a PR in a CI-only queue. AI review is not required. Background automation cannot implement code fixes while the agent
-is stopped.
+merges rather than placing a PR in a CI-only queue. AI review is not required. Background automation cannot implement code fixes while
+the agent is stopped.
 
 ## Initial rollout and prerequisites
 
@@ -177,7 +176,8 @@ or merge one PR with the same real-evidence gates:
 .venv/bin/python scripts/gitflow_automation.py --repo PatBaruch/dMotion --pr 7 --merge
 ```
 
-The merge command cannot invent a passing check or bypass a protection. The protection template requires only `test` and `pr-policy`. During migration,
+The merge command cannot invent a passing check or bypass a protection.
+The protection template requires only `test` and `pr-policy`. During migration,
 inspect live protections on both `main` and `develop`. If `ai-review` is still
 required, remove only that context as explicitly requested by the maintainer;
 preserve all other checks, strictness, and conversation-resolution requirements.
@@ -191,7 +191,9 @@ read-only. Changing this broader setting needs maintainer approval. If disabled,
 promotion creation is blocked and reported; no local token is copied into secrets.
 
 Enable Dependabot security updates separately. Weekly Dependabot configuration
-and scheduled scans become active on main. After rollout, dispatch **Gitflow automation** and **Checks** for immediate
+and scheduled scans become active on main.
+
+After rollout, dispatch **Gitflow automation** and **Checks** for immediate
 verification and retain exact-head reports. A manual dispatch demonstrates
 execution; the first actual scheduled run remains separate evidence. Repository
 configuration is never a substitute for those actual results.

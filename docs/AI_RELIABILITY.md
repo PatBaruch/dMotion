@@ -89,7 +89,7 @@ important demonstration evidence before expiry.
 
 Feature completion and the trusted Gitflow loop do not request AI reviews.
 Disable automatic review for `PatBaruch/dMotion` in the separate
-[Codex code review settings](https://chatgpt.com/codex/settings/code-review)
+[Codex code review settings](https://chatgpt.com/settings/code-review)
 to stop account-triggered reviews too. A repository commit cannot change that setting.
 
 - Default-branch policy, schedules, and Dependabot configuration activate on main.

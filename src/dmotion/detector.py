@@ -6,6 +6,7 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 
+from dmotion.checkpoint import checkpoint_snapshot
 from dmotion.config import AppConfig
 
 logger = logging.getLogger(__name__)
@@ -71,7 +72,9 @@ class MoneyDetector:
                 "or review your photos and run make train. "
                 "Use make demo to check camera/audio first."
             )
-        self.model = YOLO(str(model_path))
+        with checkpoint_snapshot(model_path, config.root / ".cache" / "checkpoints") as snapshot:
+            snapshot_path, self.model_sha256 = snapshot
+            self.model = YOLO(str(snapshot_path))
         if set(self.model.names.values()) not in ({"money_spread"}, {"cash"}):
             raise ValueError("The trained model must contain a single cash or money_spread class")
         report = model_path.with_suffix(".json")
