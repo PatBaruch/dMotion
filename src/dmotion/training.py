@@ -11,6 +11,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from uuid import uuid4
 
+from dmotion.checkpoint import checkpoint_snapshot
 from dmotion.config import AppConfig
 from dmotion.dataset import Dataset, _write_json, export_dataset
 from dmotion.detector import prepare_environment, select_device
@@ -63,9 +64,10 @@ def train_model(
     pretrained_path = config.root / "models" / MODEL_ID
     pretrained_path.parent.mkdir(parents=True, exist_ok=True)
     logger.info("Training reviewed cash on %s; run %s", selected_device, run_name)
-    model = YOLO(str(pretrained_path))
-    with pretrained_path.open("rb") as source:
-        pretrained_sha256 = hashlib.file_digest(source, "sha256").hexdigest()
+    if not pretrained_path.is_file():
+        # Materialize Ultralytics' standard YOLO26m download once. The model used
+        # for training is loaded separately from the captured bytes below.
+        YOLO(str(pretrained_path))
     updates = {"optimizer_steps": 0, "positive_lr_optimizer_steps": 0}
     step_hooks = []
 
@@ -81,27 +83,30 @@ def train_model(
         # A post-hook observes actual updates, including whether AMP skipped a step.
         step_hooks.append(trainer.optimizer.register_step_post_hook(count_optimizer_step))
 
-    model.add_callback("on_train_start", install_step_counter)
-    try:
-        model.train(
-            data=str(data_path),
-            epochs=epochs,
-            imgsz=image_size,
-            device=selected_device,
-            batch=batch,
-            nbs=batch,  # Avoid accumulating many epochs before an update on small datasets.
-            workers=0,
-            patience=patience,
-            pretrained=True,
-            seed=42,
-            project=str(project),
-            name=run_name,
-            exist_ok=False,
-            plots=False,
-        )
-    finally:
-        for handle in step_hooks:
-            handle.remove()
+    with checkpoint_snapshot(pretrained_path, config.root / ".cache" / "checkpoints") as snapshot:
+        snapshot_path, pretrained_sha256 = snapshot
+        model = YOLO(str(snapshot_path))
+        model.add_callback("on_train_start", install_step_counter)
+        try:
+            model.train(
+                data=str(data_path),
+                epochs=epochs,
+                imgsz=image_size,
+                device=selected_device,
+                batch=batch,
+                nbs=batch,  # Avoid accumulating many epochs before an update on small datasets.
+                workers=0,
+                patience=patience,
+                pretrained=True,
+                seed=42,
+                project=str(project),
+                name=run_name,
+                exist_ok=False,
+                plots=False,
+            )
+        finally:
+            for handle in step_hooks:
+                handle.remove()
     if not updates["positive_lr_optimizer_steps"]:
         raise RuntimeError(
             "Training produced no optimizer updates at a positive learning rate; "
