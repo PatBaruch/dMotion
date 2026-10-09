@@ -139,12 +139,10 @@ def test_validation_evidence_is_replaced_for_the_latest_commit():
     assert "first-sha" not in second
     assert "second-sha" in second
     assert second.count("<!-- dmotion-validation:start -->") == 1
-    assert "CI and Codex review run separately" in second
+    assert "CI runs separately" in second
 
 
-def test_completion_requests_review_only_after_publishing_and_labeling_task_pr(
-    tmp_path, monkeypatch
-):
+def test_completion_publishes_and_labels_without_requesting_ai_review(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     document = tmp_path / "body.md"
     document.write_text(BODY)
@@ -171,17 +169,9 @@ def test_completion_requests_review_only_after_publishing_and_labeling_task_pr(
     monkeypatch.setattr(finish, "run", successful_run)
     assert finish.main() == 0
     label = next(i for i, command in enumerate(commands) if "--add-label" in command)
-    request = next(i for i, command in enumerate(commands) if "--request-review" in command)
-    assert request > label
-    assert commands[request] == (
-        sys.executable,
-        "scripts/gitflow_automation.py",
-        "--repo",
-        "owner/repo",
-        "--pr",
-        "7",
-        "--request-review",
-    )
+    assert commands[label][:3] == ("gh", "pr", "edit")
+    assert not any("--request-review" in command for command in commands)
+    assert not any("scripts/gitflow_automation.py" in command for command in commands)
 
 
 def test_failed_checks_never_stage_commit_push_or_open_a_pr(tmp_path, monkeypatch):
