@@ -1,4 +1,4 @@
-.PHONY: setup prepare run demo doctor sound image fetch collect auto-label label dataset build-dataset train trained check format audit package-check organize-media setup-workflow finish-feature
+.PHONY: setup prepare run demo doctor sound image fetch collect auto-label label dataset build-dataset train evaluate trained check format audit package-check organize-media setup-workflow finish-feature
 
 setup:
 	sh scripts/setup.sh
@@ -42,6 +42,9 @@ build-dataset:
 
 train:
 	.venv/bin/dmotion train $(ARGS)
+
+evaluate:
+	.venv/bin/dmotion evaluate $(ARGS)
 
 check:
 	.venv/bin/ruff check .

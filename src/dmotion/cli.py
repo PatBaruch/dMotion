@@ -31,6 +31,7 @@ def parser() -> argparse.ArgumentParser:
         ("fetch", "Download a curated JSON list of image URLs"),
         ("build-dataset", "Export reviewed examples to grouped YOLO splits"),
         ("train", "Train a YOLO26m cash candidate from reviewed examples"),
+        ("evaluate", "Calibrate and compare cash checkpoints on frozen session splits"),
     ]:
         command = commands.add_parser(name, help=help_text)
         command.add_argument("--config", type=Path, default=Path("config.toml"))
@@ -65,6 +66,7 @@ def parser() -> argparse.ArgumentParser:
             "fetch",
             "build-dataset",
             "train",
+            "evaluate",
         }:
             command.add_argument("--dataset", type=Path, default=Path("data/training"))
         if name == "auto-label":
@@ -87,6 +89,34 @@ def parser() -> argparse.ArgumentParser:
         if name == "fetch":
             command.add_argument("sources", type=Path)
             command.add_argument("--limit", type=int, default=20)
+        if name == "evaluate":
+            command.add_argument("--candidate", type=Path, required=True)
+            command.add_argument(
+                "--baseline", type=Path, help="Defaults to the configured checkpoint"
+            )
+            command.add_argument(
+                "--splits", type=Path, required=True, help="Group map or YOLO export report"
+            )
+            command.add_argument(
+                "--output", type=Path, help="New output directory; never overwritten"
+            )
+            command.add_argument("--threshold", type=float, action="append", dest="thresholds")
+            command.add_argument("--max-false-alarm-rate", type=float, default=0.05)
+            command.add_argument("--min-precision", type=float, default=0.8)
+            command.add_argument("--min-recall", type=float, default=0.5)
+            command.add_argument("--iou-threshold", type=float, default=0.5)
+            command.add_argument("--image-size", type=int, default=640)
+            command.add_argument("--device", default="auto")
+            command.add_argument(
+                "--test-context",
+                choices=("fresh", "previously-inspected"),
+                default="previously-inspected",
+            )
+            command.add_argument(
+                "--require-pass",
+                action="store_true",
+                help="Exit 2 if the candidate fails frame gates",
+            )
         if name == "train":
             command.add_argument("--epochs", type=int, default=30)
             command.add_argument("--patience", type=int, default=10)
@@ -194,6 +224,29 @@ def main(argv: list[str] | None = None) -> int:
             if args.command == "build-dataset":
                 print(export_dataset(Dataset(directory), config.root / "data/yolo"))
                 return 0
+            if args.command == "evaluate":
+                from dmotion.evaluation import DEFAULT_THRESHOLDS, evaluate_checkpoints
+
+                report_path = evaluate_checkpoints(
+                    config,
+                    directory,
+                    config.resolve(str(args.splits)),
+                    args.candidate,
+                    baseline=args.baseline,
+                    output=args.output,
+                    thresholds=args.thresholds
+                    if args.thresholds is not None
+                    else DEFAULT_THRESHOLDS,
+                    max_false_alarm_rate=args.max_false_alarm_rate,
+                    min_precision=args.min_precision,
+                    min_recall=args.min_recall,
+                    iou_threshold=args.iou_threshold,
+                    test_context=args.test_context,
+                )
+                report = json.loads(report_path.read_text())
+                print(f"Candidate: {report['verdict']}. Report: {report_path}")
+                print(f"Readable report: {report_path.with_suffix('.md')}")
+                return 2 if args.require_pass and not report["candidate_gate_passed"] else 0
             if args.command == "train":
                 from dmotion.training import train_model
 

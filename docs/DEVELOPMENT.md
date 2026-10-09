@@ -39,6 +39,12 @@ from a physical session must share a group. Keep historical suggestion metadata
 readable even after the generating backend is retired. Existing datasets remain
 compatible; the legacy exported class name is retained.
 
+Checkpoint comparison uses `dmotion evaluate`; see [evaluation](EVALUATION.md).
+The scorer and validation calibration adapt the useful logic from draft PR #5 without
+its retired teachers or training orchestration. Evaluation accepts existing checkpoints,
+freezes both model identities and reviewed evaluation images, then saves calibration
+before any test predictions. A failed candidate validation leaves test inference unrun.
+
 Unit tests establish software behavior. Hardware acceptance and held-out model
 evaluation are separate checks. Follow [AI reliability](AI_RELIABILITY.md).
 
