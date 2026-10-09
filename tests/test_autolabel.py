@@ -1,3 +1,4 @@
+import hashlib
 import json
 import sys
 from dataclasses import replace
@@ -59,6 +60,7 @@ def test_batch_labels_only_pending_records_and_keeps_empty_results_pending(tmp_p
     reads = []
 
     class Detector:
+        model_sha256 = hashlib.sha256(b"test detector weights").hexdigest()
         device = "cpu"
         model = SimpleNamespace()
 
@@ -78,6 +80,8 @@ def test_batch_labels_only_pending_records_and_keeps_empty_results_pending(tmp_p
     report = auto_label(AppConfig(root=tmp_path), dataset.directory, output=tmp_path / "output")
     summary = json.loads(report.read_text())
     assert summary["frames"] == 2
+    assert summary["model_sha256"] == Detector.model_sha256
+    assert summary["model_revision"] == "sha256:" + Detector.model_sha256
     assert summary["frames_with_boxes"] == 1
     assert summary["boxes"] == 1
     assert len(reads) == 2
@@ -88,6 +92,8 @@ def test_batch_labels_only_pending_records_and_keeps_empty_results_pending(tmp_p
     assert cash["boxes"] == empty["boxes"] == []
     assert cash["suggestion"]["boxes"] == [[0, 10, 90, 70]]
     assert empty["suggestion"]["boxes"] == []
+    assert cash["suggestion"]["model_sha256"] == Detector.model_sha256
+    assert empty["suggestion"]["model_sha256"] == Detector.model_sha256
 
 
 def test_source_tampering_stops_before_creating_a_suggestion(tmp_path, monkeypatch):
@@ -103,7 +109,9 @@ def test_source_tampering_stops_before_creating_a_suggestion(tmp_path, monkeypat
     monkeypatch.setitem(sys.modules, "cv2", SimpleNamespace())
     monkeypatch.setattr(
         "dmotion.autolabel.MoneyDetector",
-        lambda config: SimpleNamespace(device="cpu", model=SimpleNamespace()),
+        lambda config: SimpleNamespace(
+            device="cpu", model=SimpleNamespace(), model_sha256="a" * 64
+        ),
     )
     before = dataset.manifest_path.read_bytes()
     with pytest.raises(ValueError, match="changed since import"):
@@ -293,6 +301,7 @@ def test_inference_preserves_a_concurrent_review_or_existing_draft(tmp_path, mon
     state = {"calls": 0}
 
     class Detector:
+        model_sha256 = hashlib.sha256(b"test detector weights").hexdigest()
         device = "cpu"
 
         def __init__(self, config):
@@ -360,6 +369,7 @@ def test_interrupted_labeling_resumes_complete_audit_without_replacing_drafts(
     state = {"fail": True}
 
     class Detector:
+        model_sha256 = hashlib.sha256(b"test detector weights").hexdigest()
         device = "cpu"
 
         def __init__(self, config):

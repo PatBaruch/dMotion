@@ -157,9 +157,8 @@ def auto_label(config: AppConfig, directory: Path, *, output: Path | None = None
             raise ValueError(
                 "Supply a trained YOLO26m cash checkpoint with --model before auto-labeling"
             )
-        with model.open("rb") as checkpoint:
-            model_digest = hashlib.file_digest(checkpoint, "sha256").hexdigest()
         detector = MoneyDetector(config)
+        model_digest = detector.model_sha256
         device = detector.device
         revision = f"sha256:{model_digest}"
         logger.info("Suggesting cash boxes for %s pictures on %s", len(pending), device)

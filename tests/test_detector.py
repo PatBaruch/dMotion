@@ -1,5 +1,7 @@
+import hashlib
 import sys
 from dataclasses import replace
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -64,7 +66,10 @@ def test_trained_detector_loads_custom_yolo_without_overwriting_learned_class_na
     path.write_bytes(b"model placeholder")
     detector = MoneyDetector(config)
     assert detector.device == "cpu"
-    assert calls == [("load", "trained", str(path)), ("to", "cpu")]
+    loaded = Path(calls[0][2])
+    assert loaded.name == path.name and loaded != path and not loaded.exists()
+    assert calls[1] == ("to", "cpu")
+    assert detector.model_sha256 == hashlib.sha256(path.read_bytes()).hexdigest()
 
 
 @pytest.mark.parametrize("names", [{}, {0: "person"}, {0: "money_spread", 1: "person"}])
@@ -96,4 +101,33 @@ def test_semantic_cash_class_is_accepted_without_prompt_encoding(tmp_path, monke
     path.parent.mkdir()
     path.write_bytes(b"cash checkpoint")
     MoneyDetector(config)
-    assert calls == [("load", "trained", str(path)), ("to", "cpu")]
+    assert Path(calls[0][2]).name == path.name
+    assert calls[1] == ("to", "cpu")
+
+
+def test_detector_hash_matches_loaded_bytes_when_original_is_replaced(tmp_path, monkeypatch):
+    install_fake_models(monkeypatch)
+    config = trained_config(tmp_path)
+    original = config.resolve(config.detector.model)
+    original.parent.mkdir()
+    original.write_bytes(b"old cash checkpoint")
+    loaded = []
+
+    class Model:
+        names = {0: "cash"}
+
+        def __init__(self, path):
+            replacement = original.with_name("replacement.pt")
+            replacement.write_bytes(b"new cash checkpoint")
+            replacement.replace(original)
+            loaded.append(Path(path).read_bytes())
+
+        def to(self, device):
+            pass
+
+    monkeypatch.setattr(sys.modules["ultralytics"], "YOLO", Model)
+    detector = MoneyDetector(config)
+    assert loaded == [b"old cash checkpoint"]
+    assert original.read_bytes() == b"new cash checkpoint"
+    assert detector.model_sha256 == hashlib.sha256(loaded[0]).hexdigest()
+    assert list((tmp_path / ".cache/checkpoints").iterdir()) == []

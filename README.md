@@ -369,6 +369,11 @@ with `audio.py` playing the alert. Training is `cli.py → dataset.py → traini
 labeling uses `collect.py`, `autolabel.py`, and `labeler.py`.
 See the [developer file map](docs/FILE_LAYOUT.md), [development guide](docs/DEVELOPMENT.md),
 [Git workflow](docs/GIT_WORKFLOW.md), and [reliability gates](docs/AI_RELIABILITY.md).
+Model loading and training capture a private checkpoint snapshot and record the
+SHA-256 of those exact bytes, so replacing the source checkpoint during a run
+cannot misidentify its weights. Snapshots are cleaned up after loading or training;
+training keeps its snapshot available until the run finishes.
+
 The pipeline runs tests, security scans, package checks, and PR policy. It does not
 request or require AI code review. Disable the separate repository automatic-review
 toggle in [Codex settings](https://chatgpt.com/codex/settings/code-review) to prevent
