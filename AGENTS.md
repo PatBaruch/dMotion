@@ -17,8 +17,11 @@ These instructions apply to implementation tasks without a separate reminder.
 Explanation-only, planning-only, and review-only requests do not publish changes.
 An explicit user instruction to keep work local, pause, or skip publication wins.
 
-- Start from current `origin/develop` on `feature/<name>`. Use an isolated worktree
-  when this checkout contains other work. Never sweep existing changes into a task.
+- Create a fresh `feature/<task-name>` branch from current `origin/develop` for
+  every new implementation task, including a distinct task in the same chat.
+  Never reuse a completed, merged, or unrelated task branch. Follow-up fixes for
+  the same open task stay on its branch and PR. Use an isolated worktree when
+  this checkout contains other work. Never sweep existing changes into a task.
 - Run `make setup-workflow` in a new clone. If core dependencies are missing,
   install from `uv.lock` using the core-only command in `docs/GIT_WORKFLOW.md`.
 - Implement the complete requested behavior. Add meaningful tests for new behavior
@@ -49,6 +52,21 @@ An explicit user instruction to keep work local, pause, or skip publication wins
   Tagging and production deployment require separate authorization.
   See `docs/GIT_WORKFLOW.md` for commands and the difference between automatic
   completion, local hooks, GitHub checks, and optional manual code review.
+
+## Work tracking
+
+- Use a descriptive task branch name and conventional commit/PR titles so the
+  branch, commits, and PR describe the same unit of work.
+- Keep the PR description current: explain what changed, why, relevant files,
+  actual validation results, and remaining limitations. Link related issues or
+  PRs when they exist; do not invent tracking IDs.
+- Add a concise PR progress comment when a meaningful implementation or fix is
+  published, a blocker changes, or the task completes. Include the affected
+  commit SHA, what was done, validation evidence, and anything still pending.
+  Update the PR body to describe the final result and keep comments as its history.
+- Report the branch and PR link to the user. After completion, record the merge
+  result and any pending promotion separately; never call pending CI successful.
+  Keep source comments focused on non-obvious reasoning or constraints.
 
 ## Code Review Rules
 
