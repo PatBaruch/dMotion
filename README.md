@@ -239,18 +239,29 @@ results.csv / args.yaml  Ultralytics training evidence
 ```
 
 `make train` never overwrites the live `models/cash-yolo26m.pt`. It deliberately
-leaves the test split unevaluated. Choose confidence on validation frames first,
-then freeze it and assess the candidate once on held-out test sessions. For a
-repeatable model-level check after freezing the threshold:
+leaves the test split unevaluated. Compare an existing candidate with your configured
+cash checkpoint using the same reviewed dataset and its frozen export:
 
 ```sh
-.venv/bin/yolo detect val model=/path/to/candidate.pt data=data/yolo/dataset.yaml split=test conf=0.55 imgsz=640 device=cpu
-.venv/bin/dmotion run --model /path/to/candidate.pt --confidence 0.55
+.venv/bin/dmotion evaluate --dataset data/training \
+  --splits data/yolo/export-report.json --candidate /path/to/candidate.pt --device cpu
+# Or: make evaluate ARGS='--splits data/yolo/export-report.json --candidate /path/to/candidate.pt'
 ```
 
-Replace `0.55` with your selected value. Inspect tight-box precision/recall,
-cash-free false-positive frames, missed cash, and inference time. Ultralytics mAP
-alone does not measure the repeated-frame audio trigger. Rehearse new webcam
+Use `--baseline /path/to/current.pt` if the configured checkpoint is elsewhere.
+Each checkpoint gets its own confidence threshold, selected **only on validation**.
+The command saves `calibration.json` before test inference. If no candidate
+threshold passes validation, it saves a failure report and skips test inference
+for both checkpoints. Otherwise it scores the test set at the frozen thresholds.
+
+Default frame gates require box precision >= 80%, box recall >= 50%, and detections
+on <= 5% of negative frames. Reports include exact checkpoint hashes, session splits,
+raw predictions, misses, false alarms, and inference timings. Open `report.md` in
+the printed run folder for a readable comparison; `report.json` is machine-readable.
+A completed report does not change your active checkpoint. See the
+[evaluation guide](docs/EVALUATION.md) for frozen split maps, options, and limits.
+
+Frame metrics do not measure the repeated-frame audio trigger. Rehearse new webcam
 conditions too. Keep test sessions out of retraining; once used to guide changes,
 they are no longer a blind test. Preserve exports and reports before rebuilding.
 

@@ -118,3 +118,71 @@ def test_training_patience_reaches_training_function(monkeypatch, tmp_path, argu
     monkeypatch.setitem(sys.modules, "dmotion.training", SimpleNamespace(train_model=train))
     assert main(["train", "--dataset", str(tmp_path), *arguments]) == 0
     assert received["patience"] == expected
+
+
+@pytest.mark.parametrize(
+    "passed,require_pass,expected", [(True, True, 0), (False, True, 2), (False, False, 0)]
+)
+def test_evaluation_cli_routes_explicit_paths_and_reports_gate_status(
+    monkeypatch, tmp_path, passed, require_pass, expected, capsys
+):
+    import json
+
+    received = {}
+    report_path = tmp_path / "report.json"
+    report_path.write_text(
+        json.dumps(
+            {
+                "verdict": "passed_frame_gates" if passed else "failed_test",
+                "candidate_gate_passed": passed,
+            }
+        )
+    )
+
+    def evaluate(config, directory, split_file, candidate, **kwargs):
+        received.update(
+            config=config, directory=directory, split_file=split_file, candidate=candidate, **kwargs
+        )
+        return report_path
+
+    monkeypatch.setitem(
+        sys.modules,
+        "dmotion.evaluation",
+        SimpleNamespace(DEFAULT_THRESHOLDS=(0.5,), evaluate_checkpoints=evaluate),
+    )
+    arguments = [
+        "evaluate",
+        "--dataset",
+        str(tmp_path),
+        "--splits",
+        str(tmp_path / "splits.json"),
+        "--candidate",
+        "candidate.pt",
+        "--baseline",
+        "baseline.pt",
+        "--device",
+        "cpu",
+        "--image-size",
+        "320",
+        "--threshold",
+        "0.3",
+        "--threshold",
+        "0.7",
+        "--test-context",
+        "fresh",
+    ]
+    assert main(arguments + (["--require-pass"] if require_pass else [])) == expected
+    assert received["thresholds"] == [0.3, 0.7]
+    assert received["config"].detector.device == "cpu"
+    assert received["config"].detector.image_size == 320
+    assert received["candidate"].name == "candidate.pt"
+    assert received["test_context"] == "fresh"
+    assert "Readable report:" in capsys.readouterr().out
+
+
+def test_evaluation_help_needs_no_vision_packages():
+    before = set(sys.modules)
+    with pytest.raises(SystemExit) as result:
+        main(["evaluate", "--help"])
+    assert result.value.code == 0
+    assert not ({"torch", "ultralytics", "cv2", "pygame"} & (set(sys.modules) - before))
