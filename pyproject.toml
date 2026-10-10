@@ -13,7 +13,7 @@ dependencies = ["filelock>=3.19,<5"]
 [project.optional-dependencies]
 vision = [
   "ultralytics>=8.4,<9",
-  "opencv-python>=4.10,<5",
+  "opencv-python>=4.10,<6",
   "numpy>=1.26,<3",
   "pillow>=11,<13",
   "pygame>=2.6,<3",
