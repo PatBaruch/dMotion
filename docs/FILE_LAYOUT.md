@@ -9,6 +9,7 @@ Start with [README](../README.md) for setup, commands and the supported YOLO26m 
 | `monitor.py`, `trigger.py`, `audio.py` | Fresh inference, confirmation/rearming, audio |
 | `collect.py`, `download.py` | Original-media import, capture and optional downloads |
 | `dataset.py`, `labeler.py`, `autolabel.py` | Review truth, session splits, human labels and YOLO26m drafts |
+| `evaluation.py` | Reviewed snapshots, frozen session plans, validation calibration and comparison reports |
 | `training.py` | YOLO26m initialization, optimizer evidence and separate candidate output |
 | `tests/` | Core behavior, integrity, model-selection and workflow checks |
 | `scripts/` | Setup, media organization, security/package checks and Git workflow |
@@ -25,6 +26,7 @@ Start with [README](../README.md) for setup, commands and the supported YOLO26m 
 | `data/videos/`, `data/photos/` | Original recordings, photos and snapshots |
 | `data/training/images/`, `manifest.json` | Dataset-owned images, explicit review decisions and groups |
 | `data/yolo/` | Grouped train/val/test export; preserve it before rebuilding |
+| `outputs/evaluation/` | Unique comparison runs, frozen evaluation images/labels, calibration and reports |
 | `outputs/yolo26m-training/` | Unique training runs, candidate weights and reports |
 | `outputs/video-autolabel/` | Draft predictions, current `report.json`, and its immutable sheet set under `contact-sheets/` |
 | `outputs/media-imports/` | Checksum/path-move journals |
