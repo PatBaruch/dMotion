@@ -110,6 +110,60 @@ Completion does not request AI review or post review-trigger comments. Tests,
 security scans, PR policy, and protected Gitflow promotion run automatically.
 AI review is optional and must be explicitly requested by the user.
 
+## CLI agents and No-mistakes
+
+WezTerm and tmux provide visible agent windows; VS Code remains the editor.
+Firstmate coordinates work, and Treehouse gives each task a separate checkout.
+`treehouse.toml` starts task checkouts from `origin/develop` and limits the pool
+to four. Keep a single writer per task branch, and install the locked core
+environment in each worktree. Do not copy large datasets or model files into
+every worktree. Hardware and training work can use separately configured assets.
+
+The ordinary `finish_feature.py` workflow remains available. A Firstmate task
+explicitly assigned to No-mistakes uses the pipeline for publication instead;
+do not also run the direct completion command for that task.
+
+`.no-mistakes.yaml` sets the PR destination to `develop`, uses merge commits
+when the integration base moves, requires `make check`, and revalidates CI
+repairs. Gate controls are read from the forge's trusted default branch, `main`.
+Merging this file into `develop` alone does not activate them. Bootstrap and
+promote the configuration through the existing checked PR workflow before
+changing Firstmate's dMotion registry mode from `direct-PR` to `no-mistakes`.
+Do not opt into untrusted branch commands to work around this requirement.
+
+For a clean, committed, exclusively owned feature branch in a registered clone:
+
+```sh
+no-mistakes init
+no-mistakes axi run --base-branch develop --intent "The user's requested outcome"
+no-mistakes axi status
+no-mistakes axi sync
+```
+
+The pipeline can ask for a decision; inspect the finding before responding.
+Use current `axi respond --help` rather than automatically approving every gate.
+The local pipeline review is part of this explicitly selected mode. It does not
+authorize GitHub review-bot triggers. Existing required GitHub checks and review
+conversations still govern merging. Keep all four repository PR sections.
+
+No-mistakes may rebase while repairing CI even with `rebase.strategy: merge`.
+It therefore has a narrow history-rewrite exception: it may update only its
+exclusively owned `feature/*` branch with an explicit expected-commit lease.
+Ordinary pushes still reject rewrites. The pipeline's internal local-gate
+trigger may skip the caller hook, while delivery pushes retain hooks. This is
+not permission to bypass GitHub protections or push to `main` or `develop`.
+The gate uses its own repository/worktrees; do not weaken the ordinary hook to
+make pipeline rewrites work in a shared checkout.
+
+After a run changes the remote task head, synchronize using `axi sync` before
+editing or committing again. Do not reset away gate fixes, race another writer,
+or manually force-push a stale task branch. Report pipeline validation, GitHub
+CI, merging into `develop`, and promotion to `main` as separate outcomes.
+
+Gate configuration, workflow files, branch protection, and publication scripts
+are protected paths that need explicit pipeline decisions. Test evidence stays
+local by default, and user-intent text is omitted from public PR bodies.
+
 The PR records the tested commit and local check results. CI status
 remain pending until GitHub reports them. PR descriptions must explain the change,
 documentation updates, validation, and risks/limitations. The PR policy checks the

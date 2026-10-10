@@ -1,0 +1,44 @@
+# Gate controls become active after this file reaches the trusted default branch.
+agent: codex
+commands:
+  prepare: uv sync --locked --python 3.11
+  lint: .venv/bin/ruff check . && .venv/bin/ruff format --check .
+  test: make check
+  format: .venv/bin/ruff format .
+rebase:
+  strategy: merge
+ci:
+  revalidate_repairs: true
+pr:
+  base_branch: develop
+  publish_intent: false
+  template: |
+    ## Summary
+    Explain the concrete problem and resulting behavior.
+    ## Documentation
+    Identify the updated guidance or explain why no update is needed.
+    ## Validation
+    Record commands, actual results, and the tested commit. Keep pending CI explicit.
+    ## Risks and limitations
+    Record remaining risks and skipped hardware or model checks.
+document:
+  instructions: |
+    Follow docs/GIT_WORKFLOW.md. Keep detailed guidance in docs/ and the introduction
+    in README.md. Never manually edit CHANGELOG.md or generated files.
+test:
+  instructions: |
+    Run make check in the locked core environment. Core checks must not require
+    cameras, audio devices, vision dependencies, or model downloads. Record real
+    hardware and model validation separately. Core checks do not establish model
+    accuracy. Preserve reviewed labels and recording-group split boundaries.
+  evidence:
+    store_in_repo: false
+    attach_media: false
+protected_paths:
+  - .no-mistakes.yaml
+  - .github/workflows/**
+  - .github/branch-protection.json
+  - .githooks/**
+  - scripts/pre_push.py
+  - scripts/gitflow_automation.py
+  - scripts/pr_policy.py

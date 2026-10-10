@@ -33,6 +33,11 @@ An explicit user instruction to keep work local, pause, or skip publication wins
   The script checks, commits, pushes, and creates/updates a PR into `develop`.
   Feature-branch pushes and PR creation/updates are authorized for these tasks;
   do not ask for a second confirmation solely to perform them.
+  When Firstmate explicitly assigns a No-mistakes task and the trusted `main`
+  configuration is active, use that pipeline instead of publishing with this
+  script. Run `no-mistakes axi run --base-branch develop --intent "<user goal>"`,
+  handle its decisions, and synchronize with `no-mistakes axi sync` before
+  making follow-up commits. Keep the repository's PR sections and required checks.
 - Watch the PR's CI while the task is active. Inspect any existing review findings. Fix actionable
   findings in scope, rerun completion, and monitor the updated commit. If CI
   access, credentials, or an external result is unavailable, report the specific
@@ -40,15 +45,20 @@ An explicit user instruction to keep work local, pause, or skip publication wins
 - Attach created or worked-on PRs to the chat with the Codex artifact tool.
 - Post repository PR comments when needed for the authorized development task.
   Do not request AI reviews unless the user explicitly asks for a particular review.
-- Never force-push, bypass push hooks or branch protections, or push directly to
-  `main` or `develop`. Keep datasets, weights, outputs, credentials, and unrelated
+- Ordinary pushes must never rewrite history or bypass hooks. No-mistakes alone
+  may rewrite its exclusively owned `feature/*` task branch with an explicit
+  `--force-with-lease=<ref>:<expected-sha>` after validation. Never share that
+  branch with another writer. Its internal local-gate trigger may skip the caller
+  hook; delivery pushes must retain hooks. Never bypass branch protections or
+  push directly to `main` or `develop`. Keep datasets, weights, outputs, credentials, and unrelated
   work out of commits. Check before staging; never use `git add .` or `git add -A`.
 - Automatically create, push, and update feature, release, and hotfix PRs
   without asking again. Merge automatically only when required CI and
   security and PR policy checks pass, and existing blocking findings are resolved.
   AI review is optional and is not a merge requirement.
   Use PRs into protected develop/main branches and synchronize release
-  changes back into develop. Never bypass protections or force-push.
+  changes back into develop. The narrow No-mistakes exception above never applies
+  to protected integration branches or ordinary manual/agent pushes.
   Tagging and production deployment require separate authorization.
   See `docs/GIT_WORKFLOW.md` for commands and the difference between automatic
   completion, local hooks, GitHub checks, and optional manual code review.
