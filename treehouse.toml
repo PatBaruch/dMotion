@@ -1,4 +1,4 @@
 # Each agent gets a separate checkout and environment; large local assets stay local.
 max_trees = 4
-base_branch = "origin/develop"
+base_branch = "develop"
 unique_leaf = true
