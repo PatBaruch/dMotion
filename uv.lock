@@ -1,5 +1,5 @@
 version = 1
-revision = 5
+revision = 3
 requires-python = ">=3.11, <3.14"
 resolution-markers = [
     "python_full_version >= '3.12' and sys_platform == 'win32'",
@@ -150,15 +150,6 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/9d/8a/b618149cc5207943a0242068d7a27897f56a62947b5a039085f2a22029f8/charset_normalizer-3.5.2-cp37-abi3-win_amd64.whl", hash = "sha256:9f56f72050826f63dcee7a7f55b0a77168cb3bfc553fd405e7f8f9ece75a4036", size = 200092, upload-time = "2026-09-30T04:38:49.707Z" },
     { url = "https://files.pythonhosted.org/packages/03/cf/4c66866fa9e2b1c78e3c911516d1de497a677b7ac60f1eceda74ce777ca3/charset_normalizer-3.5.2-cp37-abi3-win_arm64.whl", hash = "sha256:40ab6bffa02ae10a0581e6c198be7d2d8ca5c2a0c64e4ed3465d766df457573e", size = 294363, upload-time = "2026-09-30T04:38:51.312Z" },
     { url = "https://files.pythonhosted.org/packages/fc/ad/d07d7862a62ffa6d79d68074d14823243dd235a77c45262acbf6adeb28bf/charset_normalizer-3.5.2-py3-none-any.whl", hash = "sha256:b6b751274acb69d77b3323d6b7dbaa3c7fdfc1eb829b7eb61d262f32e1af9685", size = 68872, upload-time = "2026-09-30T04:39:21.828Z" },
-]
-
-[[package]]
-name = "cloudpickle"
-version = "3.1.2"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/27/fb/576f067976d320f5f0114a8d9fa1215425441bb35627b1993e5afd8111e5/cloudpickle-3.1.2.tar.gz", hash = "sha256:7fda9eb655c9c230dab534f1983763de5835249750e85fbcef43aaa30a9a2414", size = 22330, upload-time = "2025-11-03T09:25:26.604Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/88/39/799be3f2f0f38cc727ee3b4f1445fe6d5e4133064ec2e4115069418a5bb6/cloudpickle-3.1.2-py3-none-any.whl", hash = "sha256:9acb47f6afd73f60dc1df93bb801b472f05ff42fa6c84167d25cb206be1fbf4a", size = 22228, upload-time = "2025-11-03T09:25:25.534Z" },
 ]
 
 [[package]]
@@ -1769,11 +1760,9 @@ wheels = [
 
 [[package]]
 name = "ultralytics"
-version = "8.4.171"
+version = "8.4.175"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "cloudpickle" },
-    { name = "filelock" },
     { name = "matplotlib" },
     { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
     { name = "numpy", version = "2.5.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
@@ -1789,9 +1778,9 @@ dependencies = [
     { name = "ultralytics-platform" },
     { name = "ultralytics-thop" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/9e/f2/e00224d3163c3ef0d16428ad569b7244d3a48d9689e4b5bba2ecd7a7994e/ultralytics-8.4.171.tar.gz", hash = "sha256:8583d9d890fb166628f89b9b00bcb2465bc0ce1a6b8c5576221ebca966affc94", size = 1264362, upload-time = "2026-10-01T10:33:34.353Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/b6/00/02ad3551377db36068b9eef02e055d33c7f61c6817c1f1d364350aa9e27d/ultralytics-8.4.175.tar.gz", hash = "sha256:3af729abd18170778ca4cef7c9bff96874fca8e1220995d9512d81ed010bbc84", size = 1270777, upload-time = "2026-10-09T20:35:27.327Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/ca/04/7709444a42ee21de1934c7c79913dc5eaf48df013d2b31bff5f3490acffc/ultralytics-8.4.171-py3-none-any.whl", hash = "sha256:861c25c85821fa974ec158639c13d9beee91aad6b0fa4d05d7bd957d0a6e81d7", size = 1415683, upload-time = "2026-10-01T10:33:30.314Z" },
+    { url = "https://files.pythonhosted.org/packages/a7/88/4ac9670886f1b6a53a950e058aabf77e89d9b35848033a11b8345b00c656/ultralytics-8.4.175-py3-none-any.whl", hash = "sha256:16245f680cb6c27856398b3d78a4f4e43d583d0f0c65de0b22431526881b1e1d", size = 1422930, upload-time = "2026-10-09T20:35:22.181Z" },
 ]
 
 [[package]]
